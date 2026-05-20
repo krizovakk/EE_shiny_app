@@ -1,10 +1,10 @@
+profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx")
 
-# rsconnect::deployApp("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/_vyvoj/shiny_app")
-
-library(shiny) # aplikace
+# library(shiny) # aplikace
 library(bslib) # aplikace (layouty)
 library(shinycssloaders) # wip spinner
 library(shinyjs) # blokovani tlacitka pro stazeni pd
+library(shinymanager) # badmin sekce
 
 library(tidyverse)
 library(plotly)
@@ -24,6 +24,13 @@ options(shiny.maxRequestSize = 30*1024^2)
 
 options(shiny.launch.browser = TRUE)
 
+# init_params.R # (spustit jen jednou)
+# params <- data.frame(
+#   name = c("low_spot", "aktual_spot", "prirazka_nakup", "marzeMin", "marzeDop", "stari_OTCcen", "online", "typ_vypoctu", "banner"),
+#   value = c(24.25, 24.35, 0.3, 1.2, 6, 30, 1, 1, "Naceneni v indikativnim rezimu.")
+# )
+# 
+# saveRDS(params, "params.rds")
 
 # ---------------------------------------------------- UI
 
@@ -49,6 +56,8 @@ ui <- tagList(
     
     input_dark_mode(id = "mode"),
                     # style = "margin-left: auto;"), 
+    
+    actionButton("open_admin", "Admin"),
     
     uiOutput("banner"),
     
@@ -143,17 +152,14 @@ ui <- tagList(
               textInput("text2", tagList("Zákazník", span("*", style="color:red")), width="60%")
             ),
             
-            start_date <- floor_date(Sys.Date(), "month") + months(1),
-            end_date   <- ceiling_date(start_date, "month"),
-            
             div(
               dateRangeInput("date",
                              tagList("Období dodávky", span("*", style="color:red")),
                              width = "60%",
                              separator = " - ",
-                             start = start_date,
-                             end = end_date,
-                             min = start_date,
+                             # start = start_date,
+                             # end = end_date,
+                             min = floor_date(Sys.Date(), "month") + months(1),
                              max = floor_date(Sys.Date() %m+% years(4), "year"))
             )
             
@@ -212,7 +218,9 @@ ui <- tagList(
                  rows = 3,
                  width = "100%"))),
       
-      downloadButton("downloadReport", "Stáhnout PDF report")
+      downloadButton("downloadReport", "Stáhnout PDF report"),
+      
+      uiOutput("admin_panel")
       
     ) # konec 2. karty a 2. sloupce
   ) # konec layout columns (2 hlavni sloupce)
@@ -222,6 +230,104 @@ ui <- tagList(
 
 
 server <- function(input, output, session) {
+  
+  # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv admin panel
+  
+  admin_mode <- reactiveVal(FALSE)
+  admin_unlocked <- reactiveVal(FALSE)
+  admin_visible <- reactiveVal(FALSE)
+  
+  observeEvent(input$open_admin, {
+    
+    admin_mode(TRUE)
+    admin_visible(!admin_visible())
+    
+  })
+  
+  observeEvent(input$admin_login, {
+    
+    if (input$admin_pwd == "123") {
+      admin_unlocked(TRUE)
+      
+    } else {
+      admin_unlocked(FALSE)
+      showNotification("Špatné heslo", type = "error")
+    }
+  })
+  
+  output$admin_panel <- renderUI({
+    
+    if (!admin_visible()) return(NULL)
+    if (!admin_unlocked()) {
+      return(
+        tagList(
+          hr(),
+          div("Admin přístup", 
+              class = "fs-5", style = "
+        color: #806000;
+        background-color: #fff3bf;
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        font-weight: 500;
+        width: fit-content;
+      "),
+          passwordInput("admin_pwd", "Heslo"),
+          actionButton("admin_login", "Odemknout")
+        )
+      )
+    }
+    
+    # admin sekce
+    tagList(
+      hr(),
+      div("Admin sekce",
+          class = "fs-5", style = "
+        color: #806000;
+        background-color: #fff3bf;
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        font-weight: 500;
+        width: fit-content;
+      "),
+      
+      div(id = "params_table_wrapper",
+          DT::DTOutput("params_table"))
+    )
+  })
+  
+  params <- reactiveVal(readRDS("params.rds"))
+  
+  output$params_table <- DT::renderDT({
+    
+    DT::datatable(
+      params(),
+      editable = TRUE,
+      options = list(
+        dom = "t",
+        paging = FALSE,
+        ordering = FALSE
+      )
+    )
+    
+  }, server = FALSE)
+  
+  observeEvent(input$params_table_cell_edit, {
+    
+    info <- input$params_table_cell_edit
+    df <- params()
+    
+    df[info$row, info$col] <- DT::coerceValue(
+      info$value,
+      df[info$row, info$col]
+    )
+    
+    params(df)
+    saveRDS(df, "params.rds")
+  })
+  
+  # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ admin panel
   
   
   denni <- read_excel(file.path("data_exchange", "denni_data", "input_denniDataEE.xlsx"))
@@ -236,6 +342,23 @@ server <- function(input, output, session) {
   typ <- reactive({
     read_excel(file.path("data_exchange", "denni_data", "input_denniDataEE.xlsx"),
                range = "B11", col_names = FALSE)[[1]]
+  })
+  
+  # ---- DEFAULT HODNOTY PRO DATE RANGE ---- 
+  
+  observe({
+    
+    start_date <- floor_date(Sys.Date(), "month") + months(1)
+    end_date   <- ceiling_date(start_date, "month")
+    
+    updateDateRangeInput(
+      session,
+      "date",
+      start = start_date,
+      end = end_date,
+      min = start_date,
+      max = floor_date(Sys.Date() %m+% years(4), "year")
+    )
   })
   
   # ---- OMEZENI PROVOZU APLIKACE ----
@@ -291,30 +414,38 @@ server <- function(input, output, session) {
   
   data_upload <- reactive({
     req(input$upload)
-    read_excel(input$upload$datapath, range = cell_cols(1:2))
-    
-    # profil <- read_excel(input$upload$datapath, range = cell_cols(1:2))
-    # profil
+    upld <- readxl::read_excel(input$upload$datapath, range = cell_cols(1:2))
+    upld$datum_cas <- lubridate::dmy_hm(upld$datum_cas)
+    upld
   })
   
+
   # ---- PLOT ----
-  
-  output$plot <- renderPlot({
-    profil <- data_upload() %>% drop_na()
-    req(nrow(profil) > 0)
-    colnames(profil) <- c("datum", "profilMWh")
-    
-    ggplot(profil, aes(datum, profilMWh)) +
-      geom_col(fill = "#FFD700") +
-      labs(x = "měsíc dodávky",
-           y = "profil spotřeby [MWh]",
-           title = "Profil spotřeby klienta") +
-      scale_x_datetime(date_breaks = "1 month", date_labels = "%Y-%m") +
-      scale_y_continuous(breaks = waiver())+
-      # scale_y_continuous(breaks = seq(0, 700, by = 50))+
-      theme_light() +
+
+  output$plot <- renderPlotly({
+
+    # upld <- input$upload
+    upld <- data_upload() 
+    req(upld)
+    req(nrow(upld) > 0)
+
+    y_limits <- range(upld$profil, na.rm = TRUE)
+
+    p <- ggplot(upld, aes(datum_cas, profil)) +
+      geom_line(color = "dodgerblue4") +
+      labs(x = "datum", y = "diagram spotřeby [MWh]") +
+      # scale_x_datetime(
+      #   date_breaks = "1 week",
+      #   date_labels = "%Y-%m-%d",
+      #   expand = c(0, 0)) +
+      theme_light()+
       theme(axis.text.x = element_text(angle = 90))
+
+    ggplotly(p)
+
   })
+
+  # message(str(upld))
   
   # ---- ZADANI OBDOBI DODAVKY ----
   

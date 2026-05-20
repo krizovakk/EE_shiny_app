@@ -12,40 +12,23 @@ require(openxlsx)
 delOd <- as.Date("2026-04-01")
 delDo <- as.Date("2028-05-01")
 
-profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/data/EE_input_profil.xlsx") %>% 
-  mutate(tms = as.POSIXct(paste(datum, ctvrt)))
+profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx") 
 
 
 # ---------------------------------------------------------------------------- PLOT :: input
 
 g1 <- ggplot(profil) +
-  geom_line(aes(tms, profil1), color = "dodgerblue4") +
+  geom_line(aes(datum_cas, profil), color = "dodgerblue4") +
   labs(x = "datum",
        y = "diagram spotřeby [MWh]") + #title = "Profil spotřeby klienta"
   scale_x_datetime(date_breaks = "1 week", date_labels = "%Y-%m-%d") +
   scale_y_continuous()+
-  # scale_y_continuous(
-  #     limits = c(y_limits$min_limit, y_limits$max_limit),
-  #     breaks = seq(floor(y_limits$min_limit), ceiling(y_limits$max_limit), 
-  #                  by = 0.5))+breaks = seq(floor(y_limits$min_limit), 
-  #                                          ceiling(y_limits$max_limit), 
-  #                                          by = 0.5)+
   theme_light()+
   theme(axis.text.x = element_text(angle = 90))
 
 g1
   
 # ---------------------------------------------------------------------------- INITIAL :: single variables
-
-
-tms_now <- Sys.time()
-print(tms_now)
-
-cnb_spot <- 24.25
-aktual_spot <- cnb_spot+0.4
-risk_margin <- 0
-odchylka <- 1.6
-tolerance <- 1
 
 
 # ---------------------------------------------------------------------------- INPUT :: forward EE - WIP
@@ -184,10 +167,10 @@ frame <- data.frame(framePer) %>%
     now = ifelse(year == year(tms_now) & month == month(tms_now), 1, 0), # jaky mesic je ted
     dodavka = ifelse(framePer %in% seq(from = delOd, to = delDo, by = "month"), 1, 0)
   ) %>% 
-  left_join(profil, by = c("framePer" = "datum")) %>%
+  left_join(diagram, by = c("framePer" = "datum")) %>%
   left_join(fwd, by = c("framePer" = "mesic")) %>% 
   mutate(dodavka = ifelse(framePer %in% delPer, 1, 0)) %>%  
-  select(framePer, year, quater, month, now, dodavka, profil1, FX)
+  select(framePer, year, quater, month, now, dodavka, diagram1, FX)
 
 
 # ---------------------------------------------------------------------------- CREATE :: data_vstup - TODO
