@@ -1,0 +1,471 @@
+---
+title: "Pro prehlednejsi sestaveni analyzy pro EE"
+author: "KK"
+date: "2026-05-21"
+output: pdf_document
+---
+
+# BASE
+
+```{r, echo=FALSE}
+require(tidyverse)
+require(readxl)
+require(openxlsx)
+
+profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx") 
+
+delOd <- as.Date("2026-04-01")
+delDo <- as.Date("2028-05-01")
+
+low_spot <- 24.25 
+aktual_spot <- 24.65 
+
+
+tms_now <- as.POSIXct(Sys.time(), tz = "Europe/Prague")
+
+message(paste("NOW", tms_now))
+message(paste(delOd, " az ", delDo))
+
+```
+
+# PRESVATKOVANI
+
+```{r}
+
+load <- profil %>% 
+  mutate(timestamp = as.POSIXct(datum_cas, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague"))
+
+leden1 <- load %>% filter(month(timestamp) == 1 & day(timestamp) == 1) %>% slice(49) # 49 je 12:00
+nr <- wday(leden1$timestamp, week_start = 1) >= 3 
+
+diagram <- load %>%
+  
+  mutate( # casove promenne
+    
+    year = lubridate::year(timestamp),
+    date = lubridate::date(timestamp),
+    iso_week = lubridate::isoweek(timestamp),
+    weekday = lubridate::wday(timestamp, week_start = 1),
+    md = paste0(month(timestamp), "-", day(timestamp)) # kvuli definici svatku
+    
+  ) %>% 
+  
+  mutate( # klasifikace dne
+    
+    typeDay = ifelse(weekday %in% c(6,7), "wknd", "reg"),
+    holiday = case_when(md == "1-1" ~ "novy_rok",
+                        md == "5-1" ~ "svatek_prace",
+                        md == "5-8" ~ "konec_valky",
+                        md == "7-5" ~ "cyril_metod",
+                        md == "7-6" ~ "jan_hus",
+                        md == "9-28" ~ "sv_vaclav",
+                        md == "10-28" ~ "vznik_statu",
+                        md == "11-17" ~ "den_student",
+                        md == "12-24" ~ "stedry_den",
+                        md == "12-25" ~ "bozi_hod",
+                        md == "12-26" ~ "sv_stepan",
+                        as.Date(date) %in% as.Date(c("2024-03-29", "2025-04-18", "2026-04-03", "2027-03-26")) ~ "easter_friday",
+                        as.Date(date) %in% as.Date(c("2024-03-30", "2025-04-19", "2026-04-04", "2027-03-27")) ~ "easter_saturday",
+                        as.Date(date) %in% as.Date(c("2024-03-31", "2025-04-20", "2026-04-05", "2027-03-28")) ~ "easter_sunday",
+                        as.Date(date) %in% as.Date(c("2024-04-01", "2025-04-21", "2026-04-06", "2027-03-29")) ~ "easter_monday",
+                        TRUE ~ NA),
+    dst = case_when(as.Date(date) %in% as.Date(c("2024-03-31", "2025-03-30", "2026-03-29", "2027-03-28")) ~ "ltc",
+                    as.Date(date) %in% as.Date(c("2024-10-27", "2025-10-26", "2026-10-25", "2027-10-31")) ~ "zmc",
+                    TRUE ~ NA)
+    
+  ) %>% # indexace 15' a uprava tydne
+  
+  group_by(date) %>% mutate(porm15 = row_number()) %>% ungroup() %>% 
+  mutate(upd_week = if (nr) {dense_rank(iso_week) - 1} else {dense_rank(iso_week)},
+         
+  ) %>% 
+  
+  mutate( # definice parovani
+    
+    parovani = if_else(
+      !is.na(holiday) & typeDay == "reg",
+      "nejblizsi vsedni",
+      "puvodni profil")
+    
+  ) %>% 
+  
+  # filter(porm15 == 49) %>% 
+  
+  select(timestamp, date, typeDay, holiday, dst, iso_week, "week" = upd_week, weekday, porm15, profil, parovani) 
+
+
+nrow(diagram) == 35040
+view(diagram)
+rm(leden1)
+
+
+# ------------------------------------------------------------------------------ pull value to pair - OK
+
+# 1) par :: do sloupce parHodnota kopirujeme komplet puvodni profil
+# 2) idx_prepocet :: index radku, ktere maji "nejbl. vsedni" a ktere bude treba prepsat
+# 3) par$parHodnota[idx_prepocet] :: 
+
+
+par <- diagram %>% 
+  mutate(
+    parHodnota = profil) # duplikujeme profil do noveho sloupce, kde budou upravovany konkr. pripady
+
+idx_prepocet <- which(par$parovani == "nejblizsi vsedni") # index pro potreby vyplneni     
+
+par$parHodnota[idx_prepocet] <- 
+  par[idx_prepocet, ] %>%
+  rowwise() %>%
+  mutate(
+    val = {
+      i <- which(
+        par$date == date &
+          par$porm15 == porm15
+      )[1]
+      
+      idx_ok <- which(
+        par$typeDay == "reg" & 
+          par$parovani == "puvodni profil" & 
+          par$porm15 == porm15
+      )
+      
+      par$profil[
+        idx_ok[which.min(abs(idx_ok - i))]
+      ]
+    }
+  ) %>%
+  pull(val)      
+
+
+par_dist <- par %>% 
+  arrange(timestamp) %>%
+  distinct(week, weekday, porm15, .keep_all = TRUE) # odstrani duplicitni weekdays&weeks (na konci roku)
+
+
+# ------------------------------------------------------------------------------ set year to rescale - OK
+
+
+val_y1 <- unique(max(lubridate::year(diagram$date)))+1 # v pripade, ze nebude diagram za jeden kalendarni rok, ale treba prelom (proto max)
+val_y2 <- val_y1+2
+
+
+# ------------------------------------------------------------------------------ create future - WIP 
+
+
+Lyear <- seq(val_y1, val_y2)
+
+for(i in Lyear) {
+  
+  timeline <- tibble(
+    
+    timestamp = seq(
+      from = as.POSIXct(paste0(i, "-01-01 00:00:00"), tz = "Europe/Prague"),
+      to   = as.POSIXct(paste0(i, "-12-31 23:59:00"), tz = "Europe/Prague"),
+      by   = "15 min"))
+  
+  leden1 <- timeline %>% filter(month(timestamp) == 1 & day(timestamp) == 1) %>% slice(49) # 49 je 12:00
+  nr <- wday(leden1$timestamp, week_start = 1) >= 3
+  
+  # --------------------------- future frame
+  
+  future <- tibble(
+    
+    timestamp = seq(
+      from = as.POSIXct(paste0(i, "-01-01 00:00:00"), tz = "Europe/Prague"),
+      to   = as.POSIXct(paste0(i, "-12-31 23:59:00"), tz = "Europe/Prague"),
+      by   = "15 min")) %>% 
+    
+    mutate(  # casove promenne
+      
+      date = lubridate::date(timestamp),
+      iso_week = lubridate::isoweek(timestamp),
+      weekday = lubridate::wday(timestamp, week_start = 1),
+      md = paste0(month(timestamp), "-", day(timestamp)) # kvuli definici svatku
+    ) %>% 
+    
+    mutate( # klasifikace dne
+      
+      typeDay = case_when(weekday %in% c(6,7) ~ "wknd", TRUE ~ "reg"),
+      holiday = case_when(md == "1-1" ~ "novy_rok",
+                          md == "5-1" ~ "svatek_prace",
+                          md == "5-8" ~ "konec_valky",
+                          md == "7-5" ~ "cyril_metod",
+                          md == "7-6" ~ "jan_hus",
+                          md == "9-28" ~ "sv_vaclav",
+                          md == "10-28" ~ "vznik_statu",
+                          md == "11-17" ~ "den_student",
+                          md == "12-24" ~ "stedry_den",
+                          md == "12-25" ~ "bozi_hod",
+                          md == "12-26" ~ "sv_stepan",
+                          as.Date(date) %in% as.Date(c("2026-04-03", "2027-03-26", "2028-04-14", "2029-03-30", "2030-04-19")) ~ "easter_friday",
+                          as.Date(date) %in% as.Date(c("2026-04-04", "2027-03-27", "2028-04-15", "2029-03-31", "2030-04-20")) ~ "easter_saturday",
+                          as.Date(date) %in% as.Date(c("2026-04-05", "2027-03-28", "2028-04-16", "2029-04-01", "2030-04-21")) ~ "easter_sunday",
+                          as.Date(date) %in% as.Date(c("2026-04-06", "2027-03-29", "2028-04-17", "2029-04-02", "2030-04-22")) ~ "easter_monday",
+                          TRUE ~ NA),
+      dst = case_when(as.Date(date) %in% as.Date(c("2026-03-29", "2027-03-28", "2028-03-26", "2029-03-25", "2030-03-31")) ~ "ltc",
+                      as.Date(date) %in% as.Date(c("2026-10-25", "2027-10-31", "2028-10-29", "2029-10-28", "2030-10-27")) ~ "zmc",
+                      TRUE ~ NA)
+      
+    ) %>% # indexace 15' a uprava tydne
+    
+    group_by(date) %>% mutate(porm15 = seq_along(date)) %>% ungroup() %>% 
+    mutate(week_start = lubridate::floor_date(timestamp, "week", week_start = 1),
+           upd_week = if (nr) {dense_rank(iso_week) - 1} else {dense_rank(iso_week)}
+    ) %>% 
+    
+    select(timestamp, date, typeDay, holiday, dst, iso_week, "week" = upd_week, weekday, porm15) 
+  
+  
+  # --------------------------- df pro join 
+  
+  fill <- diagram %>% 
+    select(week, weekday, porm15, profil) %>% 
+    filter(week <= 1 | week >= 52) %>% 
+    group_by(weekday, porm15) %>% 
+    summarise(join_fill = mean(profil), .groups = "drop") %>% ungroup() # prumer kolem prelomu roku pro doplneni
+  
+  dst <- diagram %>% 
+    filter(!is.na(dst)) %>% # dst budeme prepisovat natvrdo hodnotami z puvodniho profilu
+    select(dst, porm15, "join_dst" = profil)
+  
+  hol <- diagram %>% 
+    filter(!is.na(holiday)) %>% # svatky budeme prepisovat natvrdo hodnotami z puvodniho profilu
+    select(holiday, porm15, "join_hol" = profil)
+  
+  
+  # --------------------------- df pro join 
+  
+  join <- future %>% 
+    
+    left_join(par_dist %>% select(week, weekday, porm15, "parProfil" = parHodnota), 
+              by = c("week", "weekday", "porm15")) %>% 
+    
+    left_join(fill,
+              by = c("weekday", "porm15")) %>% 
+    
+    left_join(dst,
+              by = c("dst", "porm15")) %>% 
+    
+    left_join(hol, 
+              by = c("holiday", "porm15")) %>% 
+    mutate(final = coalesce(join_dst,
+                            join_hol,
+                            parProfil,
+                            join_fill))
+  
+  presv <- join %>% 
+    select(timestamp, "presvProfil" = final)
+  
+  
+  assign(paste0(i, "_presv"), presv)
+  rm(presv)
+  
+}
+
+presv_diagram <- dplyr::bind_rows(mget(ls(pattern = "presv$"))) # presvatkovany diagram s rozlisenim 15'
+
+rm(list = ls()[grepl("_presv$", ls())])
+rm(diagram)
+rm(dst)
+rm(fill)
+rm(future)
+rm(hol)
+rm(join)
+rm(leden1)
+rm(load)
+rm(par)
+rm(par_dist)
+
+```
+
+
+
+# HPFC a EUR FORWARD
+
+```{r}
+
+a <- read_excel(file.path("data_exchange", "denni_data", "HPFC.xlsx"))
+
+hpfc <- a %>% 
+  rename("datum" = 1) %>% 
+  mutate(timestamp = as.POSIXct(datum, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague"),
+         year = year(timestamp),
+         y = str_extract(year, "..$"),
+         q = case_when(month(timestamp) <=3 ~ paste0("Q1", y),
+                       month(timestamp) <=6 ~ paste0("Q2", y),
+                       month(timestamp) <=9 ~ paste0("Q3", y),
+                       month(timestamp) <=12 ~ paste0("Q4", y)), 
+         month = month(timestamp),  
+         day = day(timestamp),  
+         hour = hour(timestamp),  
+         min = minute(timestamp)) %>% 
+  group_by(year, month, day) %>% 
+    mutate(period = seq_along(min)) %>% # 96
+  ungroup() %>% 
+  # select(timestamp, year, q, month, day, hour, min, period, CZ) 
+  select(timestamp,  CZ) 
+
+
+# rm(a)
+
+hpfc_hour <- hpfc %>%
+  mutate(timestamp_hour = floor_date(timestamp, unit = "hour")) %>%
+  group_by(timestamp_hour) %>%
+  summarise(FWDprice = mean(CZ), .groups = "drop") %>%
+  rename("timestamp" = timestamp_hour)
+
+
+cal <- hpfc_hour %>%
+  group_by(year(timestamp)) %>%
+  summarise(cal_FWDprice = mean(FWDprice), .groups = "drop")
+
+y <- hpfc_hour %>% select(year, q, price) %>% group_by(year, q) %>%
+  summarise(q_price = mean(price), .groups = "drop")
+
+mon <- hpfc_hour %>% select(year, month, price) %>% group_by(year, month) %>%
+  summarise(m_price = mean(price), .groups = "drop")
+
+message("HPFC krivka - ok")
+
+fwd <- read_excel(file.path("data_exchange", "denni_data", "001_FWD_SPP-CZ_KAM_Aktual.xlsm"),
+                  sheet = "Forward", skip = 4) %>%
+  rename("mesic" = 1, "PFC" = 2, "FX" = 3) %>%  
+  filter(mesic > tms_now) %>%   # hodnoty fwd krivky od nasledujiciho mesice
+  select(mesic, FX) %>% 
+  mutate(swap = (FX-low_spot)*1000,
+         FXrecalc = aktual_spot+swap/1000) %>% 
+  select("timestamp" = mesic, FXrecalc)
+
+view(fwd)
+
+message("FWD krivka - ok")
+
+```
+
+# OTC
+
+```{r}
+pre <- read.csv(file.path("data_exchange", "Power.csv"), header = F, sep = ",")[1,1] # jen datum pro check
+otc_tms <- mdy_hm(pre, tz = "Europe/Prague")
+
+message(paste("OTC", otc_tms))
+
+b <- read.csv(file.path("data_exchange", "Power.csv"), header = F, sep = ",") # test
+otc <- b %>%
+  select("season" = 1, "price" = 2) %>% 
+  slice(7:24) %>% 
+  mutate(
+    price = as.numeric(str_replace(price, ",", ".")),
+    year = case_when(
+      str_detect(season, "2025|25") ~ 2025,
+      str_detect(season, "2026|26") ~ 2026,
+      str_detect(season, "2027|27") ~ 2027,
+      str_detect(season, "2028|28") ~ 2028,
+      str_detect(season, "2029|29") ~ 2029,
+      TRUE ~ NA
+    ),
+    quater = case_when(
+      str_detect(season, "Q1") ~ "Q1",
+      str_detect(season, "Q2") ~ "Q2",
+      str_detect(season, "Q3") ~ "Q3",
+      str_detect(season, "Q4") ~ "Q4",
+      TRUE ~ NA
+    ),
+    month = case_when(
+      str_detect(season, "Jan-") ~ 1,
+      str_detect(season, "Feb-") ~ 2,
+      str_detect(season, "Mar-") ~ 3,
+      str_detect(season, "Apr-") ~ 4,
+      str_detect(season, "May-") ~ 5,
+      str_detect(season, "Jun-") ~ 6,
+      str_detect(season, "Jul-") ~ 7,
+      str_detect(season, "Aug-") ~ 8,
+      str_detect(season, "Sep-") ~ 9,
+      str_detect(season, "Oct-") ~ 10,
+      str_detect(season, "Nov-") ~ 11,
+      str_detect(season, "Dec-") ~ 12,
+      TRUE ~ NA
+    ),
+    cal = as.character(ifelse(str_detect(season, "^\\d{4}$"), paste0("Cal", str_remove(year, "^..")), NA))
+  ) %>% 
+  # mutate(product = paste0(cal, month, quater, year), collapse = NULL, na.rm = FALSE))
+    unite(product, c("cal", "month", "quater", "year"),
+      sep = "/", na.rm = T, remove = FALSE) 
+
+message("OTC ceny - ok")  
+
+```
+
+# FRAME
+
+frame chceme po 1 hodine
+
+```{r}
+delOd <- as.POSIXct("2026-06-01 00:00", tz = "Europe/Prague") # jen pro test
+delDo <- as.POSIXct("2028-12-31 23:45", tz = "Europe/Prague") # jen pro test
+
+frameOd <- as.POSIXct("2026-01-01 00:00", tz = "Europe/Prague")
+frameDo <- as.POSIXct("2029-12-31 00:00", tz = "Europe/Prague")
+framePer <- seq(from = frameOd, to = frameDo, by = "1 hour")
+# framePer <- seq(from = frameOd, to = frameDo, by = "15 min")
+
+delPer <- as.POSIXct(seq(from = delOd, to = delDo, by = "1 hour"), tz = "Europe/Prague")
+
+frame <- data.frame(framePer) %>% 
+  mutate(
+    quater = case_when(
+      month(framePer) <= 3 ~ "Q1",
+      month(framePer) <= 6 ~ "Q2",
+      month(framePer) <= 9 ~ "Q3",
+      month(framePer) <= 12 ~ "Q4"),
+    weekday = wday(framePer, week_start = 1),
+    now = ifelse(year(framePer) == year(tms_now) & month(framePer) == month(tms_now), 1, 0), # jaky mesic je ted
+    dodavka = ifelse(framePer %in% delPer, 1, 0)
+    # dodavka = ifelse(framePer %in% seq(from = delOd, to = delDo, by = "month"), 1, 0),
+    # facq = rep(c("acq1", "acq2", "acq3", "acq4"), each = 12) # factor ACQ
+  # ) %>% 
+  # left_join(presv_diagram, by = c("framePer" = "timestamp")) %>% 
+  # left_join(hpfc_hour, by = c("framePer" = "timestamp")) %>% 
+  # left_join(fwd, by = c("framePer" = "timestamp")) 
+  # mutate(dodavka = ifelse(framePer %in% delPer, 1, 0)
+         ) %>%  
+  select(framePer, quater, now, dodavka) %>% filter(dodavka == 1)  # ??? potrebujeme now ?  %>% filter(dodavka == 1) 
+
+message("Frame - ok")
+```
+
+# JOIN
+
+```{r}
+
+join <- frame %>%
+  
+   mutate(ym = format(as.POSIXct(framePer, tz = "Europe/Prague"), "%Y-%m"),
+          year = year(framePer)) %>% 
+  
+  # presvatkovany diagram
+  
+  left_join(presv_diagram, by = c("framePer" = "timestamp")) %>% 
+  
+  # HPFC krivka
+  
+  left_join(hpfc_hour, by = c("framePer" = "timestamp")) %>% 
+  
+  # EUR FWD
+  
+  left_join(fwd %>% mutate(ym = format(as.POSIXct(timestamp, tz = "Europe/Prague"), "%Y-%m")),
+            by = "ym") %>% 
+  
+  select(framePer, year, quater, ym, now, dodavka, presvProfil, FWDprice, FXrecalc) %>% 
+  
+  group_by(year) %>% 
+  
+  mutate(
+    full_year = n_distinct(ym) == 12,
+   yRatio = if_else(full_year, FWDprice / mean(FWDprice, na.rm = TRUE), NA_real_)
+  ) %>% 
+  
+  ungroup()
+  
+
+```
+

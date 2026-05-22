@@ -7,38 +7,44 @@ require(openxlsx)
 # colnames(profil) <- c("datum", "profilMWh", "mesic", "rok")
 # print(head(profil))
 
-# pro test
+
+# :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: TEST
+
+
+profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx") 
 
 delOd <- as.Date("2026-04-01")
 delDo <- as.Date("2028-05-01")
 
-profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx") 
+low_spot <- 24.25 
+aktual_spot <- 24.65 
 
 
-# ---------------------------------------------------------------------------- PLOT :: input
-
-g1 <- ggplot(profil) +
-  geom_line(aes(datum_cas, profil), color = "dodgerblue4") +
-  labs(x = "datum",
-       y = "diagram spotřeby [MWh]") + #title = "Profil spotřeby klienta"
-  scale_x_datetime(date_breaks = "1 week", date_labels = "%Y-%m-%d") +
-  scale_y_continuous()+
-  theme_light()+
-  theme(axis.text.x = element_text(angle = 90))
-
-g1
-  
-# ---------------------------------------------------------------------------- INITIAL :: single variables
+# ------------------------------------------------------------------------------ SETUP
 
 
-# ---------------------------------------------------------------------------- INPUT :: forward EE - WIP
+tms_now <- as.POSIXct(Sys.time(), tz = "Europe/Prague")
+
+message(paste("NOW", tms_now))
+message(paste(delOd, " az ", delDo))
+
+
+# ---------------------------------------------------------------------------- INPUT :: denni data - OK
+
+
+denni <- read_excel(file.path("data_exchange", "denni_data", "input_denniDataEE.xlsx"), range = "A1:B12", col_names = T)
+
+message("Denni data - ok")
+
+
+# ------------------------------------------------------------------------------ INPUT :: HPFC EE - WIP
 # mail from dispecingee <dispecingee@spp.sk>, file: HPFC_ddmmyy.xlsx
 
 
 # test
-a <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/data/HPFC.xlsx")
+a <- read_excel(file.path("data_exchange", "denni_data", "HPFC.xlsx"))
 
-fwd <- a %>% 
+hpfc <- a %>% 
   rename("datum" = 1) %>% 
   mutate(date = as.POSIXct(datum, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague"),
          year = year(date),
@@ -56,42 +62,51 @@ fwd <- a %>%
   ungroup() %>% 
   select(datum, date, year, q, month, day, hour, min, period, SK, CZ, DE) 
 
-fwd_hour <- fwd %>% 
+hpfc_hour <- hpfc %>% 
   select(year, q, month, day, hour, CZ) %>% 
   group_by(year, q, month, day, hour) %>% 
   summarise(price = mean(CZ)) %>% 
   ungroup()
 
-cal <- fwd_hour %>% select(year, price) %>% group_by(year) %>% 
+cal <- hpfc_hour %>% select(year, price) %>% group_by(year) %>% 
   summarise(cal_price = mean(price))
 
-y <- fwd_hour %>% select(year, q, price) %>% group_by(year, q) %>% 
+y <- hpfc_hour %>% select(year, q, price) %>% group_by(year, q) %>% 
   summarise(q_price = mean(price)) %>% 
   ungroup()
 
-mon <- fwd_hour %>% select(year, month, price) %>% group_by(year, month) %>% 
+mon <- hpfc_hour %>% select(year, month, price) %>% group_by(year, month) %>% 
   summarise(m_price = mean(price)) %>% 
   ungroup()
 
+message("HPFC krivka - ok")
 
-# ---------------------------------------------------------------------------- INPUT :: FWD EUR - OK
 
-a <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/ZP/ZP_shiny_app/data/input_fwdKrivka.xlsx", sheet = "Rentry")
-a$mesic <- as.Date(a$mesic, origin = "1899-12-30")
-fwd <- a %>% 
-  rename("PFC" = NCG, "FX" = 'FX rate') %>% 
+# ------------------------------------------------------------------------------ INPUT :: FWD EUR - OK
+
+
+fwd <- read_excel(file.path("data_exchange", "denni_data", "001_FWD_SPP-CZ_KAM_Aktual.xlsm"),
+                  sheet = "Forward", skip = 4) %>%
+  rename("mesic" = 1, "PFC" = 2, "FX" = 3) %>%  
   filter(mesic > tms_now) %>%   # hodnoty fwd krivky od nasledujiciho mesice
   select(mesic, FX) %>% 
-  mutate(swap = (FX-cnb_spot)*1000,
+  mutate(swap = (FX-low_spot)*1000,
          eur_prepoc = aktual_spot+swap/1000)
 
 view(fwd)
 
+message("FWD krivka - ok")
 
-# ---------------------------------------------------------------------------- INPUT :: OTC - OK
+
+# ------------------------------------------------------------------------------ INPUT :: OTC - OK
 
 
-b <- read.csv("X:/OTC/CSV/Power.csv", header = F, sep = ",") # test
+pre <- read.csv(file.path("data_exchange", "Power.csv"), header = F, sep = ",")[1,1] # jen datum pro check
+otc_tms <- mdy_hm(pre, tz = "Europe/Prague")
+
+message(paste("OTC", otc_tms))
+
+b <- read.csv(file.path("data_exchange", "Power.csv"), header = F, sep = ",") # test
 otc <- b %>%
   select("season" = 1, "price" = 2) %>% 
   slice(7:24) %>% 
@@ -133,14 +148,14 @@ otc <- b %>%
     unite(product, c("cal", "month", "quater", "year"),
       sep = "/", na.rm = T, remove = FALSE) 
 
+message("OTC ceny - ok")  
+
 # test
 
 # otc[8,2] <- NA
 # otc[8,2] <- 31.270
 
-
-
-# ---------------------------------------------------------------------------- CREATE :: frame - OK
+# ------------------------------------------------------------------------------ CREATE :: frame - OK
 
 
 delOd <- as.POSIXct("2026-06-01 00:00", tz = "Europe/Prague") # jen pro test
@@ -148,12 +163,17 @@ delDo <- as.POSIXct("2028-12-31 23:45", tz = "Europe/Prague") # jen pro test
 
 frameOd <- as.POSIXct("2026-01-01 00:00", tz = "Europe/Prague")
 frameDo <- as.POSIXct("2029-12-31 00:00", tz = "Europe/Prague")
-framePer <- seq(from = frameOd, to = frameDo, by = "15 min")
+framePer <- seq(from = frameOd, to = frameDo, by = "1 hour")
+# framePer <- seq(from = frameOd, to = frameDo, by = "15 min")
 
-delPer <- as.POSIXct(seq(from = delOd, to = delDo, by = "15 min") %>% head(-1)) # head = maze posledni element (1.1.2027)
+delPer <- as.POSIXct(seq(from = delOd, to = delDo, by = "1 hour") 
+                     
+                     %>% head(-1)) # head = maze posledni element (1.1.2027)
 
 frame <- data.frame(framePer) %>% 
   mutate(
+    date = date(framePer),
+    hour = hour(framePer),
     year = year(framePer),
     month = month(framePer),
     quater = case_when(
@@ -162,24 +182,21 @@ frame <- data.frame(framePer) %>%
       month <= 9 ~ "Q3",
       month <= 12 ~ "Q4"),
     day = day(framePer),
-    hour = hour(framePer),
-    min = minute(framePer),
+    weekday = wday(framePer, week_start = 1),
     now = ifelse(year == year(tms_now) & month == month(tms_now), 1, 0), # jaky mesic je ted
-    dodavka = ifelse(framePer %in% seq(from = delOd, to = delDo, by = "month"), 1, 0)
-  ) %>% 
-  left_join(diagram, by = c("framePer" = "datum")) %>%
+    dodavka = ifelse(framePer %in% seq(from = delOd, to = delDo, by = "month"), 1, 0),
+    # facq = rep(c("acq1", "acq2", "acq3", "acq4"), each = 12) # factor ACQ
+  ) 
+  left_join(profil, by = c("framePer" = "datum_cas")) %>%
   left_join(fwd, by = c("framePer" = "mesic")) %>% 
   mutate(dodavka = ifelse(framePer %in% delPer, 1, 0)) %>%  
-  select(framePer, year, quater, month, now, dodavka, diagram1, FX)
+  select(framePer, date, hour, year, quater, month, now, dodavka, profil, FX)
+
+message("Frame - ok")
 
 
-# ---------------------------------------------------------------------------- CREATE :: data_vstup - TODO
+# ------------------------------------------------------------------------------ CREATE :: data_vstup - TODO
 
-
-low_spot <- 24.30
-aktual_spot <- low_spot + 0.4
-surcharge <- 0.05 
-bsd <- 1.2
 
 join <- frame %>%
   

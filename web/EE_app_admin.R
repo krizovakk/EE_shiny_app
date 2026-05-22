@@ -5,9 +5,11 @@
 
 # params <- data.frame(
 #   name = c("low_spot", "aktual_spot", "prirazka_nakup", "marzeMin", "marzeDop", "stari_OTCcen", "online", "typ_vypoctu", "banner"),
+#   # name = c("low_spot", "aktual_spot", "param3", "param4", "param5", "param6", "online", "typ_vypoctu", "banner"),
 #   value = c(24.25, 24.35, 0.3, 1.2, 6, 30, 1, 1, "Naceneni v indikativnim rezimu.")
+#   # value = c(24.25, 24.35, 26, 27, 28, 29, 1, 1, "Naceneni v indikativnim rezimu.")
 # )
-
+# 
 # saveRDS(params, "params.rds")
 
 # .............................................................................. global - DONE
