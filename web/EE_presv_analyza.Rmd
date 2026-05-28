@@ -12,20 +12,18 @@ require(tidyverse)
 require(readxl)
 require(openxlsx)
 
-profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx") 
+# profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx")
 
-delOd <- as.Date("2026-04-01")
-delDo <- as.Date("2028-05-01")
+delOd <- as.POSIXct("2026-06-01 00:00", tz = "Europe/Prague") # jen pro test
+delDo <- as.POSIXct("2027-12-31 23:45", tz = "Europe/Prague") # jen pro test
 
 low_spot <- 24.25 
-aktual_spot <- 24.65 
-
+aktual_spot <- 24.30
 
 tms_now <- as.POSIXct(Sys.time(), tz = "Europe/Prague")
 
 message(paste("NOW", tms_now))
 message(paste(delOd, " az ", delDo))
-
 ```
 
 # PRESVATKOVANI
@@ -93,9 +91,6 @@ diagram <- load %>%
   
   select(timestamp, date, typeDay, holiday, dst, iso_week, "week" = upd_week, weekday, porm15, profil, parovani) 
 
-
-nrow(diagram) == 35040
-view(diagram)
 rm(leden1)
 
 
@@ -269,17 +264,15 @@ rm(dst)
 rm(fill)
 rm(future)
 rm(hol)
-rm(join)
 rm(leden1)
 rm(load)
 rm(par)
 rm(par_dist)
+rm(timeline)
 
 ```
 
-
-
-# HPFC a EUR FORWARD
+# HPFC 
 
 ```{r}
 
@@ -287,74 +280,37 @@ a <- read_excel(file.path("data_exchange", "denni_data", "HPFC.xlsx"))
 
 hpfc <- a %>% 
   rename("datum" = 1) %>% 
-  mutate(timestamp = as.POSIXct(datum, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague"),
-         year = year(timestamp),
-         y = str_extract(year, "..$"),
-         q = case_when(month(timestamp) <=3 ~ paste0("Q1", y),
-                       month(timestamp) <=6 ~ paste0("Q2", y),
-                       month(timestamp) <=9 ~ paste0("Q3", y),
-                       month(timestamp) <=12 ~ paste0("Q4", y)), 
-         month = month(timestamp),  
-         day = day(timestamp),  
-         hour = hour(timestamp),  
-         min = minute(timestamp)) %>% 
-  group_by(year, month, day) %>% 
-    mutate(period = seq_along(min)) %>% # 96
-  ungroup() %>% 
-  # select(timestamp, year, q, month, day, hour, min, period, CZ) 
+  mutate(timestamp = as.POSIXct(datum, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague")) %>% 
   select(timestamp,  CZ) 
 
-
-# rm(a)
-
-hpfc_hour <- hpfc %>%
-  mutate(timestamp_hour = floor_date(timestamp, unit = "hour")) %>%
-  group_by(timestamp_hour) %>%
-  summarise(FWDprice = mean(CZ), .groups = "drop") %>%
-  rename("timestamp" = timestamp_hour)
-
-
-cal <- hpfc_hour %>%
-  group_by(year(timestamp)) %>%
-  summarise(cal_FWDprice = mean(FWDprice), .groups = "drop")
-
-y <- hpfc_hour %>% select(year, q, price) %>% group_by(year, q) %>%
-  summarise(q_price = mean(price), .groups = "drop")
-
-mon <- hpfc_hour %>% select(year, month, price) %>% group_by(year, month) %>%
-  summarise(m_price = mean(price), .groups = "drop")
-
 message("HPFC krivka - ok")
-
-fwd <- read_excel(file.path("data_exchange", "denni_data", "001_FWD_SPP-CZ_KAM_Aktual.xlsm"),
-                  sheet = "Forward", skip = 4) %>%
-  rename("mesic" = 1, "PFC" = 2, "FX" = 3) %>%  
-  filter(mesic > tms_now) %>%   # hodnoty fwd krivky od nasledujiciho mesice
-  select(mesic, FX) %>% 
-  mutate(swap = (FX-low_spot)*1000,
-         FXrecalc = aktual_spot+swap/1000) %>% 
-  select("timestamp" = mesic, FXrecalc)
-
-view(fwd)
-
-message("FWD krivka - ok")
 
 ```
 
 # OTC
 
 ```{r}
-pre <- read.csv(file.path("data_exchange", "Power.csv"), header = F, sep = ",")[1,1] # jen datum pro check
+pre <- read.csv(file.path("data_exchange", "Power.csv"), 
+                header = F, sep = ",",
+                fileEncoding = "Windows-1250")[1,1] # jen datum pro check
 otc_tms <- mdy_hm(pre, tz = "Europe/Prague")
 
 message(paste("OTC", otc_tms))
 
-b <- read.csv(file.path("data_exchange", "Power.csv"), header = F, sep = ",") # test
+riskMargin <- 0 # toto do adminu
+odchylka <- 1.5
+rizeniOdch <- 0.33
+
+pricti <- riskMargin + odchylka + rizeniOdch
+
+b <- read.csv(file.path("data_exchange", "Power.csv"), 
+              header = F, sep = ",", 
+              fileEncoding = "Windows-1250") # test
 otc <- b %>%
   select("season" = 1, "price" = 2) %>% 
   slice(7:24) %>% 
   mutate(
-    price = as.numeric(str_replace(price, ",", ".")),
+    price = as.numeric(str_replace(price, ",", ".")) + pricti, # zde se pricitaji prirazky k cene
     year = case_when(
       str_detect(season, "2025|25") ~ 2025,
       str_detect(season, "2026|26") ~ 2026,
@@ -392,43 +348,31 @@ otc <- b %>%
       sep = "/", na.rm = T, remove = FALSE) 
 
 message("OTC ceny - ok")  
-
 ```
 
 # FRAME
 
-frame chceme po 1 hodine
-
 ```{r}
-delOd <- as.POSIXct("2026-06-01 00:00", tz = "Europe/Prague") # jen pro test
-delDo <- as.POSIXct("2028-12-31 23:45", tz = "Europe/Prague") # jen pro test
 
 frameOd <- as.POSIXct("2026-01-01 00:00", tz = "Europe/Prague")
-frameDo <- as.POSIXct("2029-12-31 00:00", tz = "Europe/Prague")
-framePer <- seq(from = frameOd, to = frameDo, by = "1 hour")
-# framePer <- seq(from = frameOd, to = frameDo, by = "15 min")
+frameDo <- as.POSIXct("2029-12-31 23:45", tz = "Europe/Prague")
+framePer <- seq(from = frameOd, to = frameDo, by = "15 min")
 
-delPer <- as.POSIXct(seq(from = delOd, to = delDo, by = "1 hour"), tz = "Europe/Prague")
+delPer <- as.POSIXct(seq(from = delOd, to = delDo, by = "15 min"), tz = "Europe/Prague")
 
 frame <- data.frame(framePer) %>% 
   mutate(
+    date = date(framePer),
+    year = year(framePer),
+    month = month(framePer),
     quater = case_when(
       month(framePer) <= 3 ~ "Q1",
       month(framePer) <= 6 ~ "Q2",
       month(framePer) <= 9 ~ "Q3",
       month(framePer) <= 12 ~ "Q4"),
-    weekday = wday(framePer, week_start = 1),
-    now = ifelse(year(framePer) == year(tms_now) & month(framePer) == month(tms_now), 1, 0), # jaky mesic je ted
-    dodavka = ifelse(framePer %in% delPer, 1, 0)
-    # dodavka = ifelse(framePer %in% seq(from = delOd, to = delDo, by = "month"), 1, 0),
-    # facq = rep(c("acq1", "acq2", "acq3", "acq4"), each = 12) # factor ACQ
-  # ) %>% 
-  # left_join(presv_diagram, by = c("framePer" = "timestamp")) %>% 
-  # left_join(hpfc_hour, by = c("framePer" = "timestamp")) %>% 
-  # left_join(fwd, by = c("framePer" = "timestamp")) 
-  # mutate(dodavka = ifelse(framePer %in% delPer, 1, 0)
-         ) %>%  
-  select(framePer, quater, now, dodavka) %>% filter(dodavka == 1)  # ??? potrebujeme now ?  %>% filter(dodavka == 1) 
+    day = day(framePer),
+    dodavka = ifelse(framePer %in% delPer, 1, 0))  %>% 
+  select(framePer, date, year, quater, month, day, dodavka) %>% filter(dodavka == 1)  
 
 message("Frame - ok")
 ```
@@ -439,33 +383,97 @@ message("Frame - ok")
 
 join <- frame %>%
   
-   mutate(ym = format(as.POSIXct(framePer, tz = "Europe/Prague"), "%Y-%m"),
-          year = year(framePer)) %>% 
+   # OTC - OK
   
+   left_join(otc %>% 
+               select(year, month, "mPrice" = price), by = c("year", "month")) %>% 
+   left_join(otc %>% 
+               select(year, quater, "qPrice" = price), by = c("year", "quater")) %>% 
+   left_join(otc %>%
+                filter(!is.na(cal)) %>%
+                select(year, "yPrice" = price), by = c("year")) %>% 
+   mutate(otcPrice = ifelse(!is.na(yPrice), yPrice, 
+                            ifelse(!is.na(qPrice), qPrice, mPrice))) %>% 
+  
+   # HPFC krivka
+  
+  left_join(hpfc, by = c("framePer" = "timestamp")) %>% drop_na(CZ) %>% # drop na smaze NA z many to many joinu
+  
+  group_by(year) %>% mutate(yMean = mean(CZ, na.rm = T)) %>% ungroup() %>% 
+  
+  group_by(year, quater) %>% mutate(qMean = mean(CZ, na.rm = T)) %>% ungroup() %>% 
+  
+  group_by(year, month) %>% mutate(mMean = mean(CZ, na.rm = T)) %>% ungroup() %>% 
+  
+  mutate(ratio = round(ifelse(!is.na(yPrice), CZ/yMean, 
+                        ifelse(!is.na(qPrice), CZ/qMean, CZ/mMean)),3),
+         EURmwh = otcPrice*ratio) %>% 
+  
+  # select(-mPrice, -qPrice, -yPrice, -yMean, -qMean, -mMean, -dodavka) %>%
+  
+  # filter(oh %in% c(1, 2)&month %in% c(6, 10)&day == 1)
+
   # presvatkovany diagram
   
   left_join(presv_diagram, by = c("framePer" = "timestamp")) %>% 
+  mutate(EUR = round(EURmwh*presvProfil, 3))
   
-  # HPFC krivka
-  
-  left_join(hpfc_hour, by = c("framePer" = "timestamp")) %>% 
-  
-  # EUR FWD
-  
-  left_join(fwd %>% mutate(ym = format(as.POSIXct(timestamp, tz = "Europe/Prague"), "%Y-%m")),
-            by = "ym") %>% 
-  
-  select(framePer, year, quater, ym, now, dodavka, presvProfil, FWDprice, FXrecalc) %>% 
-  
-  group_by(year) %>% 
-  
-  mutate(
-    full_year = n_distinct(ym) == 12,
-   yRatio = if_else(full_year, FWDprice / mean(FWDprice, na.rm = TRUE), NA_real_)
-  ) %>% 
-  
-  ungroup()
-  
+  view(join)
 
+```
+
+# EUR FWD
+
+```{r}
+
+fwd <- read_excel(file.path("data_exchange", "denni_data", "001_FWD_SPP-CZ_KAM_Aktual.xlsm"),
+                  sheet = "Forward", skip = 4) %>%
+  rename("mesic" = 1, "PFC" = 2, "FX" = 3) %>%  
+  filter(mesic > tms_now) %>%   # hodnoty fwd krivky od nasledujiciho mesice
+  select(mesic, FX) %>% 
+  mutate(year = year(mesic),
+         month = month(mesic),
+         swap = (FX-low_spot)*1000,
+         FXrecalc = aktual_spot+swap/1000) %>% 
+  select(year, month, FXrecalc)
+
+message("FWD krivka - ok")
+
+czk <- join %>% 
+  group_by(year, month) %>% summarise(mwhMonth = round(sum(presvProfil), 0),
+                                      eurMonth = round(sum(EUR), 0)) %>% 
+  mutate(eurmwhMonth = round(eurMonth/mwhMonth, 3)) %>% 
+  left_join(fwd, by = c("year", "month"))
+
+kurz <- mean(czk$FXrecalc)
+
+view(czk)
+```
+
+# -> VYPOCTY
+
+```{r}
+
+mean_EURmwh <- mean(join$EURmwh) # prumerna cena pro obdobi dodavky
+suma_profil <- sum(join$presvProfil)
+suma_EUR <- sum(join$EUR)
+
+predavaciCena <- suma_EUR/suma_profil
+nakladDiagram_pct <- predavaciCena/mean_EURmwh
+nakladDiagram_eur <- predavaciCena-mean_EURmwh
+
+predavaciCena_czk <- predavaciCena*kurz
+
+```
+
+
+
+
+# -> uloz presv profil pro kontrolu oproti excelu
+
+```{r}
+save <- presv_diagram %>% filter(date(timestamp) >= "2026-06-01")
+clip <- paste(formatC(save$presvProfil, format = "f", decimal.mark = ","), collapse = "\n")
+writeClipboard(clip)
 ```
 

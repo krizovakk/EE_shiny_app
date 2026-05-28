@@ -1,4 +1,4 @@
-profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx")
+# profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx")
 
 # library(shiny) # aplikace
 library(bslib) # aplikace (layouty)
