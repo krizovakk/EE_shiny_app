@@ -1,83 +1,365 @@
+# ------------------------------------------------------------------------------ TEST
+
+
+# profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_input_profil.xlsx")
+# 
+# delOd <- as.POSIXct("2026-07-01", tz = "Europe/Prague")
+# delDo <- as.POSIXct("2027-12-31", tz = "Europe/Prague")
+# 
+# obch <- "krizova"
+# zak <- "krizova2"
+# 
+# typ_vypoctu <- "indikativni"
+
 # ------------------------------------------------------------------------------ SETUP
 
 
-packages <- c(
-  "tidyverse",
-  "readxl",
-  "writexl",
-  "shiny" # aplikace
-)
-
-invisible(lapply(packages, library, character.only = TRUE))
+require(tidyverse)
+require(readxl)
+require(openxlsx)
 
 
 # ------------------------------------------------------------------------------ ANALYZA
 
 
-analyza_data <- function(profil, delOd, delDo, obch, zak, path = "data/") {
+analyza_data <- function(profil, delOd, delDo, obch, zak, acq1, acq2, acq3, acq4, acq5, typ_vypoctu, priplatek) {
   
-  tms_now <- as.POSIXct(Sys.time(), tz = "Europe/Prague")
+  tms_now <- as.POSIXct(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), tz = "Europe/Prague")
   
 message(paste("NOW", tms_now))
 message(paste(delOd, " az ", delDo))
   
+  params <- readRDS("params.rds")
+  rezim <- as.numeric(params$value[params$name == "rezim"])
+  
+  conditionPLA <- hour(tms_now)<20&rezim == 1
+  if (!conditionPLA){
+    showNotification(
+      paste("Po 15. hodině již není možné generovat závazné nabídky."),
+      type = "message",
+      duration = 15
+    )
+    typ_vypoctu <- "indikativni"
+  }
+  
+  message(conditionPLA)
+  message(rezim)  
+  
+
+  
+  
+  
+  ########################################### START PRESVATKOVANI ##############################################################
   
   # ---------------------------------------------------------------------------- FUNC :: presvatkovani
   
+  load <- profil %>% 
+    mutate(timestamp = as.POSIXct(timestamp, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague"))
+  
+  leden1 <- load %>% filter(month(timestamp) == 1 & day(timestamp) == 1) %>% slice(49) # 49 je 12:00
+  nr <- wday(leden1$timestamp, week_start = 1) >= 3 
+  
+  diagram <- load %>%
+    
+    mutate( # casove promenne
+      
+      year = lubridate::year(timestamp),
+      date = lubridate::date(timestamp),
+      iso_week = lubridate::isoweek(timestamp),
+      weekday = lubridate::wday(timestamp, week_start = 1),
+      md = paste0(month(timestamp), "-", day(timestamp)) # kvuli definici svatku
+      
+    ) %>% 
+    
+    mutate( # klasifikace dne
+      
+      typeDay = ifelse(weekday %in% c(6,7), "wknd", "reg"),
+      holiday = case_when(md == "1-1" ~ "novy_rok",
+                          md == "5-1" ~ "svatek_prace",
+                          md == "5-8" ~ "konec_valky",
+                          md == "7-5" ~ "cyril_metod",
+                          md == "7-6" ~ "jan_hus",
+                          md == "9-28" ~ "sv_vaclav",
+                          md == "10-28" ~ "vznik_statu",
+                          md == "11-17" ~ "den_student",
+                          md == "12-24" ~ "stedry_den",
+                          md == "12-25" ~ "bozi_hod",
+                          md == "12-26" ~ "sv_stepan",
+                          as.Date(date) %in% as.Date(c("2024-03-29", "2025-04-18", "2026-04-03", "2027-03-26")) ~ "easter_friday",
+                          as.Date(date) %in% as.Date(c("2024-03-30", "2025-04-19", "2026-04-04", "2027-03-27")) ~ "easter_saturday",
+                          as.Date(date) %in% as.Date(c("2024-03-31", "2025-04-20", "2026-04-05", "2027-03-28")) ~ "easter_sunday",
+                          as.Date(date) %in% as.Date(c("2024-04-01", "2025-04-21", "2026-04-06", "2027-03-29")) ~ "easter_monday",
+                          TRUE ~ NA),
+      dst = case_when(as.Date(date) %in% as.Date(c("2024-03-31", "2025-03-30", "2026-03-29", "2027-03-28")) ~ "ltc",
+                      as.Date(date) %in% as.Date(c("2024-10-27", "2025-10-26", "2026-10-25", "2027-10-31")) ~ "zmc",
+                      TRUE ~ NA)
+      
+    ) %>% # indexace 15' a uprava tydne
+    
+    group_by(date) %>% mutate(porm15 = row_number()) %>% ungroup() %>% 
+    mutate(upd_week = if (nr) {dense_rank(iso_week) - 1} else {dense_rank(iso_week)},
+           
+    ) %>% 
+    
+    mutate( # definice parovani
+      
+      parovani = if_else(
+        !is.na(holiday) & typeDay == "reg",
+        "nejblizsi vsedni",
+        "puvodni profil")
+      
+    ) %>% 
+    
+    select(timestamp, date, typeDay, holiday, dst, iso_week, "week" = upd_week, weekday, porm15, profil, parovani) 
+  
+  rm(leden1)
   
   
-  # ---------------------------------------------------------------------------- INPUT :: denni data 
+  # ------------------------------------------------------------------------------ pull value to pair - OK
+  
+  # 1) par :: do sloupce parHodnota kopirujeme komplet puvodni profil
+  # 2) idx_prepocet :: index radku, ktere maji "nejbl. vsedni" a ktere bude treba prepsat
+  # 3) par$parHodnota[idx_prepocet] :: 
   
   
-  denni <- read_excel(file.path("data","input_denniData.xlsx"), range = "A1:B9", col_names = T)
+  par <- diagram %>% 
+    mutate(
+      parHodnota = profil) # duplikujeme profil do noveho sloupce, kde budou upravovany konkr. pripady
   
-  message("Denni data - ok")
+  idx_prepocet <- which(par$parovani == "nejblizsi vsedni") # index pro potreby vyplneni     
+  
+  par$parHodnota[idx_prepocet] <- 
+    par[idx_prepocet, ] %>%
+    rowwise() %>%
+    mutate(
+      val = {
+        i <- which(
+          par$date == date &
+            par$porm15 == porm15
+        )[1]
+        
+        idx_ok <- which(
+          par$typeDay == "reg" & 
+            par$parovani == "puvodni profil" & 
+            par$porm15 == porm15
+        )
+        
+        par$profil[
+          idx_ok[which.min(abs(idx_ok - i))]
+        ]
+      }
+    ) %>%
+    pull(val)      
+  
+  par_dist <- par %>% 
+    arrange(timestamp) %>%
+    distinct(week, weekday, porm15, .keep_all = TRUE) # odstrani duplicitni weekdays&weeks (na konci roku)
   
   
-  # ---------------------------------------------------------------------------- INPUT :: forward 
+  # ------------------------------------------------------------------------------ set year to rescale - OK
+  
+  
+  val_y1 <- unique(max(lubridate::year(diagram$date)))+1 # v pripade, ze nebude diagram za jeden kalendarni rok, ale treba prelom (proto max)
+  val_y2 <- val_y1+3
+  
+  
+  # ------------------------------------------------------------------------------ create future - WIP 
+  
+  
+  Lyear <- seq(val_y1, val_y2)
+  
+  for(i in Lyear) {
+    
+    timeline <- tibble(
+      
+      timestamp = seq(
+        from = as.POSIXct(paste0(i, "-01-01 00:00:00"), tz = "Europe/Prague"),
+        to   = as.POSIXct(paste0(i, "-12-31 23:59:00"), tz = "Europe/Prague"),
+        by   = "15 min"))
+    
+    leden1 <- timeline %>% filter(month(timestamp) == 1 & day(timestamp) == 1) %>% slice(49) # 49 je 12:00
+    nr <- wday(leden1$timestamp, week_start = 1) >= 3
+    
+    # --------------------------- future frame
+    
+    future <- tibble(
+      
+      timestamp = seq(
+        from = as.POSIXct(paste0(i, "-01-01 00:00:00"), tz = "Europe/Prague"),
+        to   = as.POSIXct(paste0(i, "-12-31 23:59:00"), tz = "Europe/Prague"),
+        by   = "15 min")) %>% 
+      
+      mutate(  # casove promenne
+        
+        date = lubridate::date(timestamp),
+        iso_week = lubridate::isoweek(timestamp),
+        weekday = lubridate::wday(timestamp, week_start = 1),
+        md = paste0(month(timestamp), "-", day(timestamp)) # kvuli definici svatku
+      ) %>% 
+      
+      mutate( # klasifikace dne
+        
+        typeDay = case_when(weekday %in% c(6,7) ~ "wknd", TRUE ~ "reg"),
+        holiday = case_when(md == "1-1" ~ "novy_rok",
+                            md == "5-1" ~ "svatek_prace",
+                            md == "5-8" ~ "konec_valky",
+                            md == "7-5" ~ "cyril_metod",
+                            md == "7-6" ~ "jan_hus",
+                            md == "9-28" ~ "sv_vaclav",
+                            md == "10-28" ~ "vznik_statu",
+                            md == "11-17" ~ "den_student",
+                            md == "12-24" ~ "stedry_den",
+                            md == "12-25" ~ "bozi_hod",
+                            md == "12-26" ~ "sv_stepan",
+                            as.Date(date) %in% as.Date(c("2026-04-03", "2027-03-26", "2028-04-14", "2029-03-30", "2030-04-19")) ~ "easter_friday",
+                            as.Date(date) %in% as.Date(c("2026-04-04", "2027-03-27", "2028-04-15", "2029-03-31", "2030-04-20")) ~ "easter_saturday",
+                            as.Date(date) %in% as.Date(c("2026-04-05", "2027-03-28", "2028-04-16", "2029-04-01", "2030-04-21")) ~ "easter_sunday",
+                            as.Date(date) %in% as.Date(c("2026-04-06", "2027-03-29", "2028-04-17", "2029-04-02", "2030-04-22")) ~ "easter_monday",
+                            TRUE ~ NA),
+        dst = case_when(as.Date(date) %in% as.Date(c("2026-03-29", "2027-03-28", "2028-03-26", "2029-03-25", "2030-03-31")) ~ "ltc",
+                        as.Date(date) %in% as.Date(c("2026-10-25", "2027-10-31", "2028-10-29", "2029-10-28", "2030-10-27")) ~ "zmc",
+                        TRUE ~ NA)
+        
+      ) %>% # indexace 15' a uprava tydne
+      
+      group_by(date) %>% mutate(porm15 = seq_along(date)) %>% ungroup() %>% 
+      mutate(week_start = lubridate::floor_date(timestamp, "week", week_start = 1),
+             upd_week = if (nr) {dense_rank(iso_week) - 1} else {dense_rank(iso_week)}
+      ) %>% 
+      
+      select(timestamp, date, typeDay, holiday, dst, iso_week, "week" = upd_week, weekday, porm15) 
+    
+    
+    # --------------------------- df pro join 
+    
+    fill <- diagram %>% 
+      select(week, weekday, porm15, profil) %>% 
+      filter(week <= 1 | week >= 52) %>% 
+      group_by(weekday, porm15) %>% 
+      summarise(join_fill = mean(profil), .groups = "drop") %>% ungroup() # prumer kolem prelomu roku pro doplneni
+    
+    dst <- diagram %>% 
+      filter(!is.na(dst)) %>% # dst budeme prepisovat natvrdo hodnotami z puvodniho profilu
+      select(dst, porm15, "join_dst" = profil)
+    
+    hol <- diagram %>% 
+      filter(!is.na(holiday)) %>% # svatky budeme prepisovat natvrdo hodnotami z puvodniho profilu
+      select(holiday, porm15, "join_hol" = profil)
+    
+    
+    # --------------------------- df pro join 
+    
+    join <- future %>% 
+      
+      left_join(par_dist %>% select(week, weekday, porm15, "parProfil" = parHodnota), 
+                by = c("week", "weekday", "porm15")) %>% 
+      
+      left_join(fill,
+                by = c("weekday", "porm15")) %>% 
+      
+      left_join(dst,
+                by = c("dst", "porm15")) %>% 
+      
+      left_join(hol, 
+                by = c("holiday", "porm15")) %>% 
+      mutate(final = coalesce(join_dst,
+                              join_hol,
+                              parProfil,
+                              join_fill))
+    
+    presv <- join %>% 
+      select(timestamp, "presvProfil" = final)
+    
+    
+    assign(paste0(i, "_presv"), presv)
+    rm(presv)
+    
+  }
+  
+  presv_diagram <- dplyr::bind_rows(mget(ls(pattern = "presv$"))) # presvatkovany diagram s rozlisenim 15'
+  
+  rm(list = ls()[grepl("_presv$", ls())])
+  rm(diagram)
+  rm(dst)
+  rm(fill)
+  rm(future)
+  rm(hol)
+  rm(leden1)
+  rm(load)
+  rm(join)
+  rm(par)
+  rm(par_dist)
+  rm(timeline)
+  
+  showNotification(
+    "Přesvátkování diagramu proběhlo v pořádku.",
+    type = "message",
+    duration = 7)
   
 
-  a <- read_excel(file.path("data", "input_fwdKrivka.xlsx"), # ve slozce aplikace - treba denne aktualizovat
-                  sheet = "Rentry")
-  a$mesic <- as.Date(a$mesic, origin = "1899-12-30")
-  fwd <- a %>% 
-    rename("PFC" = NCG, "FX" = 'FX rate') %>% 
-    filter(mesic > tms_now)  # hodnoty fwd krivky od nasledujiciho mesice
+  ########################################### KONEC PRESVATKOVANI ##############################################################
+  
+  
+  
+  
+  
+  # ---------------------------------------------------------------------------- INPUT :: HPFC - OK
+  
+
+  a <- read_excel(file.path("data_exchange", "denni_data", "HPFC.xlsx"))
+  
+  hpfc <- a %>% 
+    rename("datum" = 1) %>% 
+    mutate(timestamp = as.POSIXct(datum, format = "%d.%m.%Y %H:%M", tz = "Europe/Prague")) %>% 
+    select(timestamp,  CZ) 
+  
+message("HPFC krivka - ok")
    
   
   # ------------------ kontrola ***
   
-  fwdcheck <- fwd %>% filter(mesic>=delOd)
+  fwdcheck <- hpfc %>% filter(timestamp>=delOd)
   
   # test
   # fwdcheck [20,3] <- NA
   
-  conditionFWD <- any(is.na(fwdcheck$PFC))|any(fwdcheck$PFC == 0)
+  conditionFWD <- any(is.na(fwdcheck$CZ))|any(fwdcheck$CZ == 0)
   if (conditionFWD) {
-    stop('Neuplna FWD krivka, kontaktuj Nakup.')
+    stop('Neuplna HPFC krivka, kontaktuj Nakup.')
   }
-
-  print(head(fwd))
-  
-  # ---------------------------------------------------------------------------- INPUT :: OTC - OK
   
   
-  otc_info <- file.info("X:/OTC/CSV/CZ-VTP.csv")
-  otc_tms <- otc_info$mtime
+  # ---------------------------------------------------------------------------- INPUT :: OTC
   
-  # b <- read.csv(file.path(path, "CZ-VTP.csv"), header = TRUE, sep = ",") # funguje i hostovane - staticky soubor
-  b <- read.csv("X:/OTC/CSV/CZ-VTP.csv", header = TRUE, sep = ",") # funguje lokalne - aktualizave 15'
+  
+  pre <- read.csv(file.path("data_exchange", "Power.csv"), 
+                  header = F, sep = ",",
+                  fileEncoding = "Windows-1250")[1,1] # jen datum pro check
+  otc_tms <- mdy_hm(pre, tz = "Europe/Prague")
+  
+message(paste("OTC", otc_tms))
+  
+  riskMargin <- as.numeric(params$value[params$name == "riskMargin"])
+  odchylka <- as.numeric(params$value[params$name == "odchylka"])
+  rizeniOdch <- as.numeric(params$value[params$name == "rizeniOdch"])
+  
+  pricti <- riskMargin + odchylka + rizeniOdch
+  
+  b <- read.csv(file.path("data_exchange", "Power.csv"), 
+                header = F, sep = ",", 
+                fileEncoding = "Windows-1250") # test
   otc <- b %>%
-    select("season" = 1, "price" = 2) %>%
-    filter(str_detect(season, "^CZ")) %>%
+    select("season" = 1, "price" = 2) %>% 
+    slice(7:24) %>% 
     mutate(
-      price = as.numeric(str_replace(price, ",", ".")),
+      price = as.numeric(str_replace(price, ",", ".")) + pricti, # zde se pricitaji prirazky k cene
       year = case_when(
         str_detect(season, "2025|25") ~ 2025,
         str_detect(season, "2026|26") ~ 2026,
         str_detect(season, "2027|27") ~ 2027,
         str_detect(season, "2028|28") ~ 2028,
         str_detect(season, "2029|29") ~ 2029,
+        str_detect(season, "2030|30") ~ 2030,
         TRUE ~ NA
       ),
       quater = case_when(
@@ -102,99 +384,100 @@ message(paste(delOd, " az ", delDo))
         str_detect(season, "Dec-") ~ 12,
         TRUE ~ NA
       ),
-      cal = as.character(ifelse(str_detect(season, "^CZ VTP \\d{4}$"), paste0("Cal", str_remove(year, "^..")), NA))) %>% 
+      cal = as.character(ifelse(str_detect(season, "^\\d{4}$"), paste0("Cal", str_remove(year, "^..")), NA))
+    ) %>% 
     unite(product, c("cal", "month", "quater", "year"),
-          sep = "/", na.rm = T, remove = FALSE)
+          sep = "/", na.rm = T, remove = FALSE) 
+  
+  message("OTC ceny - ok")  
 
-  print(head(otc))
+  
+  # ------------------ kontrola ***
+  
+  conditionCSV <- difftime(tms_now, otc_tms, units = "mins") > as.numeric(params$value[params$name == "stari_OTCcen"])
+  if (conditionCSV) {
+    showNotification(
+      "Nejsou k dispozici aktuální tržní ceny, nabídka je pouze indikativní.",
+      type = "warning",
+      duration = 15)
+    typ_vypoctu <- "indikativni"
+  }
   
   
   # ---------------------------------------------------------------------------- CREATE :: frame - OK
   
   
-  frameOd <- as.Date("2026-01-01") # --- treba upravit pri prechodu do noveho roku
-  frameDo <- as.Date("2029-12-31")
-  framePer <- seq(from = frameOd, to = frameDo, by = "month")
+  frameOd <- as.POSIXct("2026-01-01 00:00", tz = "Europe/Prague")
+  frameDo <- as.POSIXct("2030-12-31 23:45", tz = "Europe/Prague")
+  framePer <- seq(from = frameOd, to = frameDo, by = "15 min")
   
-  delPer <- as.POSIXct(seq(from = delOd, to = delDo, by = "month") %>% head(-1)) # head = maze posledni element (1.1.2027)
-  # print(delPer)
+  start_datetime <- lubridate::as_datetime(delOd, tz = "Europe/Prague")
+  end_datetime   <- lubridate::as_datetime(delDo, tz = "Europe/Prague") +
+    lubridate::hours(23) + lubridate::minutes(45)
+  delPer <- seq(from = start_datetime, to = end_datetime, by = "15 min")
   
-  frame <- data.frame(framePer) %>%
+  frame <- data.frame(framePer) %>% 
     mutate(
+      date = date(framePer),
       year = year(framePer),
       month = month(framePer),
       quater = case_when(
-        month <= 3 ~ "Q1",
-        month <= 6 ~ "Q2",
-        month <= 9 ~ "Q3",
-        month <= 12 ~ "Q4"
-      ),
-      now = ifelse(year == year(tms_now) & month == month(tms_now), 1, 0), # jaky mesic je ted
-      dodavka = ifelse(framePer %in% seq(from = delOd, to = delDo, by = "month"), 1, 0)
-    ) %>%
-    left_join(profil, by = c("framePer" = "datum")) %>%
-    left_join(fwd, by = c("framePer" = "mesic")) %>% 
-    mutate(dodavka = ifelse(framePer %in% delPer, 1, 0)) %>%  
-    select(framePer, year, quater, month, now, dodavka, profilMWh, PFC, FX)
+        month(framePer) <= 3 ~ "Q1",
+        month(framePer) <= 6 ~ "Q2",
+        month(framePer) <= 9 ~ "Q3",
+        month(framePer) <= 12 ~ "Q4"),
+      day = day(framePer),
+      dodavka = ifelse(framePer %in% delPer, 1, 0), 
+      facq = case_when(year == 2026 ~ "acq1",
+                       year == 2027 ~ "acq2",
+                       year == 2028 ~ "acq3",
+                       year == 2029 ~ "acq4",
+                       year == 2030 ~ "acq5")) %>% 
+    select(framePer, date, year, quater, month, day, dodavka, facq) %>% filter(dodavka == 1)  
   
-  print(head(frame))
+message("Frame - ok")
+
   
+  # ---------------------------------------------------------------------------- CREATE :: join
   
-  # ---------------------------------------------------------------------------- CREATE :: data_vstup - OK
-  
-  
-  low_spot <- denni[[2]][1]
-  aktual_spot <- denni[[2]][3]
-  surcharge <- denni[[2]][0]
-  bsd <- denni[[2]][5]
-  # 
-  # low_spot <- 24.250
-  # aktual_spot <- low_spot + 0.35
-  # surcharge <- 0.00 
-  # bsd <- 1.2
   
   join <- frame %>%
     
-    # cena komodity
+    # OTC 
     
-    group_by(year) %>%
-    mutate(yRatio = PFC/mean(PFC)) %>% # kdyz neni cely rok, hodi pres prumer NA
-    ungroup() %>% group_by(year, quater) %>%
-    
-    mutate(celyQ = if_else(all(!is.na(PFC)) & is.na(yRatio), "ANO", "NE"),
-           qRatio = ifelse(celyQ == "ANO", PFC/mean(PFC), NA),
-           PFCratio = coalesce(yRatio, qRatio)) %>% ungroup() %>%
-    select(-yRatio, -qRatio) %>%
-    left_join(otc %>%
-                select(year, month, "monPrice" = price), by = c("year", "month")) %>%
-    left_join(otc %>%
-                select(year, quater, "qPrice" = price), by = c("year", "quater")) %>%
+    left_join(otc %>% 
+                select(year, month, "mPrice" = price), by = c("year", "month")) %>% 
+    left_join(otc %>% 
+                select(year, quater, "qPrice" = price), by = c("year", "quater")) %>% 
     left_join(otc %>%
                 filter(!is.na(cal)) %>%
-                select(year, "calPrice" = price), by = c("year")) %>%
-    mutate(otcPrice = case_when(celyQ == "NE" & is.na(PFCratio) ~ monPrice,
-                                celyQ == "ANO" ~ qPrice,
-                                TRUE ~ calPrice),
-           PFCprepoc = round(ifelse(!is.na(PFCratio), otcPrice*PFCratio, otcPrice), 3),
-           
-           # kurz EUR
-           
-           swapPoint = round((FX-low_spot)*1000, 2), 
-           FXrecalc0 = aktual_spot+swapPoint/1000, # +surcharge (ale v excelu je 0)
-           # FXrecalc = round(FXrecalc0+surcharge, 4),
-           FXrecalc = (FXrecalc0),
-           
-           cenaEUR = profilMWh*PFCprepoc,
-           vazenaCena = profilMWh*FXrecalc,
-           # product = paste(month, quater, year))
-           product = case_when(year(tms_now) != year ~ paste0("Cal", str_remove(year, "^..")),
-                               TRUE ~ paste0(month, "/", year)))
+                select(year, "yPrice" = price), by = c("year")) %>% 
+    mutate(otcPrice = ifelse(!is.na(yPrice), yPrice, 
+                             ifelse(!is.na(qPrice), qPrice, mPrice))) %>% 
+    
+    # HPFC krivka
+    
+    left_join(hpfc, by = c("framePer" = "timestamp")) %>% drop_na(CZ) %>% # drop na smaze NA z many to many joinu
+    
+    group_by(year) %>% mutate(yMean = mean(CZ, na.rm = T)) %>% 
+    ungroup() %>% 
+    group_by(year, quater) %>% mutate(qMean = mean(CZ, na.rm = T)) %>% 
+    ungroup() %>% 
+    group_by(year, month) %>% mutate(mMean = mean(CZ, na.rm = T)) %>% 
+    ungroup() %>% 
+    
+    mutate(ratio = round(ifelse(!is.na(yPrice), CZ/yMean, 
+                                ifelse(!is.na(qPrice), CZ/qMean, CZ/mMean)),3),
+           EURmwh = otcPrice*ratio) %>% 
+    
+    select(-mPrice, -qPrice, -yPrice, -yMean, -qMean, -mMean) %>%
+    
+    # presvatkovany diagram
+    
+    left_join(presv_diagram, by = c("framePer" = "timestamp")) %>% 
+    mutate(EUR = round(EURmwh*presvProfil, 3))
   
-  data_vstup <- join %>%
-    select(year, month, dodavka, profilMWh, product, otcPrice, PFCprepoc, cenaEUR, FXrecalc, vazenaCena) %>%
-    filter(dodavka == 1) # final df to match table on sheet Kalkulace
-  
-  print(head(data_vstup))
+message("Join - ok")
   
   
   # ------------------ kontrola ***
@@ -203,69 +486,137 @@ message(paste(delOd, " az ", delDo))
   # data_vstup[11, 6] <- NA
   # data_vstup[18, 4] <- -5
 
-  conditionOTC <- any(is.na(data_vstup$otcPrice))
+  conditionOTC <- any(is.na(join$otcPrice))
   if (conditionOTC) {
-    prod <- data_vstup$product[is.na(data_vstup$otcPrice)]
-    stop(paste0("Momentalne neni dostupna vstupni cena pro ", prod, ". Zkus vypocet znovu za 15 min."))
-    # stop("Chybi vstupni cena pro vypocet.")
+    stop("Momentalne neni dostupna vstupni cena pro jeden z produktů. Zkus vypocet znovu za 15 min.")
   }
  
-  conditionPROF <- any(is.na(data_vstup$profilMWh))
+  conditionPROF <- any(is.na(join$presvProfil))
   if (conditionPROF) {
     stop('Neuplny profil, zkontroluj vstupni data.')
   }
  
-  conditionZAP <- any(data_vstup$profilMWh < 0)
+  conditionZAP <- any(join$presvProfil < 0)
   if (conditionZAP) {
     stop('Zaporna data v profilu, zkontroluj vstupni data.')
   }
+  
+  # acq_map <- c(
+  #   if (exists("acq1")) c(acq1 = acq1),
+  #   if (exists("acq2")) c(acq2 = acq2),
+  #   if (exists("acq3")) c(acq3 = acq3),
+  #   if (exists("acq4")) c(acq4 = acq4),
+  #   if (exists("acq5")) c(acq5 = acq5)
+  # )
+  # 
+  # df_acq <- join %>%
+  #   group_by(facq) %>%
+  #   summarise(acq = round(sum(presvProfil), 0), .groups = "drop") %>% 
+  #   mutate(
+  #     inp = as.numeric(acq_map[match(as.character(facq), names(acq_map))]),
+  #     inp_round = round(inp, 0),
+  #     missing_inp = is.na(inp_round),
+  #     check = !missing_inp & acq == inp_round
+  #   )
+  # 
+  # if (any(df_acq$missing_inp)) {
+  #   missing_facq <- paste(df_acq$facq[df_acq$missing_inp], collapse = ", ")
+  #   showNotification(
+  #     paste0("Chybi ACQ pro: ", missing_facq, "."),
+  #     type = "error",
+  #     duration = 15)
+  #   # return(NULL)
+  # }
+  # 
+  # conditionACQ <- any(!df_acq$check)
+  # if (conditionACQ) {
+  #   showNotification(
+  #     "Zadané ACQ nesouhlasí se součtem v profilu, zkontrolujte vstupní data.",
+  #     type = "error",
+  #     duration = 15)
+  #   return(NULL)
+  # }
 
-  conditionDUP <- any(duplicated(profil$datum))
-  if (conditionDUP) {
-    stop('V profilu se objevují duplicity, zkontroluj vstupni data.')
-  }
+  
+  # ---------------------------------------------------------------------------- CALCULATE :: EUR FWD
+  
+  
+  low_spot <- as.numeric(params$value[params$name == "low_spot"])
+  aktual_spot <- as.numeric(params$value[params$name == "aktual_spot"])
+  cnb_kurz <- as.numeric(params$value[params$name == "cnb_kurz"])
+  
+  
+  fwd <- read_excel(file.path("data_exchange", "denni_data", "001_FWD_SPP-CZ_KAM_Aktual.xlsm"),
+                    sheet = "Forward", skip = 4) %>% 
+    rename("mesic" = 1, "PFC" = 2, "FX" = 3) %>%  
+    filter(mesic > tms_now) %>%   # hodnoty fwd krivky od nasledujiciho mesice
+    select(mesic, FX) %>% 
+    mutate(year = year(mesic),
+           month = month(mesic),
+           swap = (FX-low_spot)*1000,
+           FXrecalc = aktual_spot+swap/1000,
+           FX_akt = cnb_kurz) %>% 
+    select(year, month, FXrecalc, FX_akt)
+  
+message("FWD krivka - ok")
+  
+  # czk <- join %>% 
+  #   group_by(year, month) %>% summarise(mwhMonth = round(sum(presvProfil), 0),
+  #                                       eurMonth = round(sum(EUR), 0)) %>% ungroup() %>% 
+  #   mutate(eurmwhMonth = round(eurMonth/mwhMonth, 3)) %>% 
+  #   left_join(fwd, by = c("year", "month"))
+  # 
+  # kurz <- mean(czk$FXrecalc)
+  kurz_akt <- cnb_kurz
 
   
-  # ---------------------------------------------------------------------------- CALCULATE :: fix_cena - OK
+  # ---------------------------------------------------------------------------- CALCULATE :: fix_cena 
   
   
-  # vypocty pod tabulkou
+  # vypocty 
   
-  suma_profil <- round(sum(data_vstup$profilMWh, na.rm = TRUE), 0)
-  acq <- data_vstup %>% 
-    group_by(year) %>% summarise(rocni_odber = round(sum(profilMWh, na.rm = T), 0))
-  suma_cenaEUR <- sum(data_vstup$cenaEUR, na.rm = TRUE)
-  suma_vazenaCena <- sum(data_vstup$vazenaCena, na.rm = TRUE)
-  mean_PFC <- mean(data_vstup$PFCprepoc, na.rm = TRUE)
-  nakup <- suma_cenaEUR/suma_profil
-  prirazka_nakup <- 0.000 #  ???
-  kurz <- suma_vazenaCena/suma_profil
-  prodej_eur <- nakup+prirazka_nakup
-  prodej_czk <- prodej_eur*kurz
+  acq <- join %>% 
+    group_by(year) %>% summarise(rocni_odber = round(sum(presvProfil, na.rm = T), 0))
   
-  # # vypocty nad tabulkou
+  mean_EURmwh <- mean(join$EURmwh) # prumerna cena pro obdobi dodavky
+  suma_profil <- sum(join$presvProfil)
+  suma_EUR <- sum(join$EUR)
   
-  naklad_profil <- round(nakup-mean_PFC, 2)
-  fin_cenaEUR <- ceiling(prodej_eur/0.025) * 0.025 # zaokrouhleni na nejblizsi nejvyssi hranici 0,025
-  fin_cenaCZK <- ceiling((fin_cenaEUR*kurz)/0.05) * 0.05 # zaokrouhleni na nejblizsi nejvyssi hranici 0,05
+  predavaciCena <- suma_EUR/suma_profil
+  nakladDiagram_pct <- predavaciCena/mean_EURmwh
+  nakladDiagram_eur <- predavaciCena-mean_EURmwh
+  
+  predavaciCena_czk <- predavaciCena*cnb_kurz # -------------------------------------------------- !!! pouzivame POUZE CNB kurz !!!
   
   print("Vypocty probehly :-)")
   
   # ------------------ kontrola ***
   
-  conditionNPF <- naklad_profil < 0
+  conditionNPF <- nakladDiagram_eur < 0
   if (conditionNPF) {
-    print('Zaporny naklad na profil')
+    showNotification(
+      "Záporný náklad na diagram, zkontrolujte relevantnost dat.",
+      type = "warning",
+      duration = 15)
   }
-
+  
+  condition4GW <- any(acq$rocni_odber > 250000)
+  # condition4GW <- any(acq$rocni_odber > 2500)
+  if (condition4GW) {
+    typ_vypoctu <- "indikativni"
+    showNotification(
+      "Zadané ACQ přesahuje 2,5 GWh, pro závaznou nabídku kontaktujte Nákupní oddělení.",
+      type = "warning",
+      duration = 30)
+  }
+  
   
   # ---------------------------------------------------------------------------- CREATE :: marze - IP
   
   
-  marzeMin <- denni[[2]][6]
-  marzeDop <- denni[[2]][7]
-  # marzeMin <- 1.2
-  # marzeDop <- 6
+  marzeMin <- as.numeric(params$value[params$name == "marzeMin"])
+  marzeDop <- as.numeric(params$value[params$name == "marzeDop"])
+
   txt_marzeMin <- sprintf("%.2f", marzeMin) # text, zobrazuje cislo s presne 2 decimals
   txt_marzeDop <- sprintf("%.2f", marzeDop)
   
@@ -280,6 +631,7 @@ message(paste(delOd, " az ", delDo))
       "Období dodávky",
       "Vytvoření nabídky",
       "Platnost nabídky",
+      "Typ nabídky",
       "CQ [MWh]",
       "ACQ [MWh]",
       "Předávací cena pro obchod [€]",
@@ -287,99 +639,90 @@ message(paste(delOd, " az ", delDo))
       "HM1 [€]",
       "Prodejní cena pro zákazníka [€]",
       "Prodejní cena pro zákazníka [CZK]",
-      "Prumer EUR", # pro testovani, pak odstranit
-      "Suma ceny EUR", # pro testovani, pak odstranit
-      "Suma vazene ceny", # pro testovani, pak odstranit
-      "Nakup", # pro testovani, pak odstranit
-      "Prodej", # pro testovani, pak odstranit
-      "Kurz", # pro testovani, pak odstranit
-      "Naklad na profil" # pro testovani, pak odstranit
+      "Příplatek za specifika"
     ),
     
     Hodnota = c(
       obch,
       zak,
       paste0(delOd, " až ", delDo),
-      format(as.POSIXct(tms_now, origin = "1899-12-30"), "%F %R"),
+      format(as.POSIXct(Sys.time(), tz = "Europe/Prague", origin = "1899-12-30"), "%F %R"),
       paste0(format(as.POSIXct(Sys.Date(), origin = "1899-12-30"), "%F"), " 15:00"),
-      suma_profil,
+      ifelse(typ_vypoctu == "indikativni", paste("Pouze indikativní"), paste("Závazná")),
+      round(suma_profil, 2),
       paste(
         paste(acq$year, acq$rocni_odber, sep = ": "),
         collapse = ", "),
-      round(fin_cenaEUR, 2),
-      round(fin_cenaCZK, 2),
+      round(predavaciCena, 2),
+      round(predavaciCena_czk, 2),
       paste("Minimální:", txt_marzeMin, " /  Doporučená:", txt_marzeDop),
-      paste("Minimální:",  round(fin_cenaEUR+marzeMin, 2), 
-            " /  Doporučená:",  round(fin_cenaEUR+marzeDop)),
-      paste("Minimální:", round(fin_cenaCZK+marzeMin*kurz, 2), 
-            " /  Doporučená:", round(fin_cenaCZK+marzeDop*kurz, 2)),
-      round(mean_PFC, 3), # pro testovani, pak odstranit
-      round(suma_cenaEUR, 0), # pro testovani, pak odstranit
-      round(suma_vazenaCena, 0), # pro testovani, pak odstranit
-      round(nakup, 3), # pro testovani, pak odstranit
-      round(prodej_czk, 3), # pro testovani, pak odstranit
-      round(kurz, 2), # pro testovani, pak odstranit
-      naklad_profil # pro testovani, pak odstranit
+      paste("Minimální:",  round(predavaciCena+marzeMin, 2), 
+            " /  Doporučená:",  round(predavaciCena+marzeDop, 2)),
+      paste("Minimální:", round(predavaciCena_czk+marzeMin*cnb_kurz, 2), 
+            " /  Doporučená:", round(predavaciCena_czk+marzeDop*cnb_kurz, 2)),
+      priplatek
     )
   )
   
-  colnames(fix_cena) <- NULL
   
-  
-  # ---------------------------------------------------------------------------- REPORTS :: txt, pdf - DONE
+  # ---------------------------------------------------------------------------- REPORTS :: txt, pdf 
   
   # simple txt
   
   on.exit({
-    log <- paste(tms_now, obch, zak, suma_profil, delOd, delDo, fin_cenaEUR, sep = ";")
-    write(log, "data/kalkulackaZP_log.txt", append = TRUE)
+    log <- paste(tms_now, typ_vypoctu, obch, zak, round(suma_profil, 2), delOd, delDo, round(predavaciCena, 2), sep = ";")
+    write(log, "pdf_logy/kalkulackaEE_log.txt", append = TRUE)
   })
   
+  message(typ_vypoctu)
+  
   # pdf pro Nakup
-  
-  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  
-  p <- ggplot(profil, aes(datum, profilMWh)) +
-    # geom_line(linewidth = 2, color = "gold") +
-    geom_col(fill = "gold") +
-    labs(x = "měsíc dodávky",
-         y = "profil spotřeby [MWh]",
-         title = "Profil spotřeby klienta") +
-    scale_x_datetime(date_breaks = "1 month", date_labels = "%Y-%m") +
-    scale_y_continuous(breaks = seq(0, 700, by = 50))+
-    theme_light() +
-    theme(axis.text.x = element_text(angle = 90))
-  
-  rmarkdown::render(
-    input = "reportNakup.Rmd",
-    output_file = paste0(path, "pdf_logy/proNakup_VypocetFixCenyZP_report_", timestamp, ".pdf"),
-    output_format = "pdf_document",
-    # output_dir = output_dir,
-    params = list(
-      obchodnik = obch,
-      zakaznik = zak,
-      datum_od = delOd,
-      datum_do = delDo,
-      profil = profil,
-      plot_profil = p,
-      fwd = fwd,
-      otc = otc,
-      fix_cena = fix_cena
-    ),
-    # envir = new.env(parent = globalenv())
-    # ),
-    quiet = TRUE
-  )
+
+  # if (typ_vypoctu == "zavazny") {
+  #   
+  #   timestamp <- format(tms_now, "%Y%m%d_%H%M", tz = "Europe/Prague")
+  #   
+  #   p <- ggplot(profil, aes(datum, profilMWh)) +
+  #     geom_col(fill = "gold") +
+  #     labs(x = "měsíc dodávky",
+  #          y = "profil spotřeby [MWh]",
+  #          title = "Profil spotřeby klienta") +
+  #     scale_x_datetime(date_breaks = "1 month", date_labels = "%Y-%m") +
+  #     scale_y_continuous(breaks = seq(0, 700, by = 50))+
+  #     theme_light() +
+  #     theme(axis.text.x = element_text(angle = 90))
+  #   
+  #   rmarkdown::render(
+  #     input = "reportNakup.Rmd",
+  #     output_file = paste0("pdf_logy/proNakup_VypocetFixCenyZP_report_",
+  #                          timestamp, "_",
+  #                          obch, "_", zak, "_", fin_cenaEUR, ".pdf"),
+  #     output_format = "pdf_document",
+  #     params = list(
+  #       obchodnik = obch,
+  #       zakaznik = zak,
+  #       datum_od = delOd,
+  #       datum_do = delDo,
+  #       profil = profil,
+  #       plot_profil = p,
+  #       denni = denni, 
+  #       fwd = fwd,
+  #       otc = otc,
+  #       fix_cena = fix_cena)
+  #   )
+  #   
+  # } else {
+  #   message("Automatické ukládání PDF přeskočeno – indikativní výpočet")
+  # }
 
   
   # ---------------------------------------------------------------------------- RETURN :: fix_cena - OK
   
     
   return(list(
-    profil = profil,
+    # profil = profil,
     fwd = fwd,
     otc = otc,
     fix_cena = fix_cena
   ))
 }
-

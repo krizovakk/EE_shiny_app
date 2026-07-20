@@ -13,8 +13,8 @@ require(openxlsx)
 
 profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx") 
 
-delOd <- as.Date("2026-04-01")
-delDo <- as.Date("2028-05-01")
+delOd <- as.Date("2026-05-01")
+delDo <- as.Date("2027-12-31")
 
 low_spot <- 24.25 
 aktual_spot <- 24.65 

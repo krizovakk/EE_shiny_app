@@ -12,10 +12,10 @@ require(tidyverse)
 require(readxl)
 require(openxlsx)
 
-# profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx")
+profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_shiny_app/web/data/EE_input_profil.xlsx")
 
-delOd <- as.POSIXct("2026-06-01 00:00", tz = "Europe/Prague") # jen pro test
-delDo <- as.POSIXct("2027-12-31 23:45", tz = "Europe/Prague") # jen pro test
+# delOd <- as.POSIXct("2026-06-01 00:00", tz = "Europe/Prague") # jen pro test
+# delDo <- as.POSIXct("2027-12-31 23:45", tz = "Europe/Prague") # jen pro test
 
 low_spot <- 24.25 
 aktual_spot <- 24.30
@@ -140,7 +140,7 @@ par_dist <- par %>%
 
 
 val_y1 <- unique(max(lubridate::year(diagram$date)))+1 # v pripade, ze nebude diagram za jeden kalendarni rok, ale treba prelom (proto max)
-val_y2 <- val_y1+2
+val_y2 <- val_y1+3
 
 
 # ------------------------------------------------------------------------------ create future - WIP 
@@ -383,7 +383,7 @@ message("Frame - ok")
 
 join <- frame %>%
   
-   # OTC - OK
+   # OTC 
   
    left_join(otc %>% 
                select(year, month, "mPrice" = price), by = c("year", "month")) %>% 
@@ -466,7 +466,62 @@ predavaciCena_czk <- predavaciCena*kurz
 
 ```
 
+# TAB FIX CENA
 
+```{r}
+
+# pro test
+  marzeMin <- 1.2
+  marzeDop <- 6
+  obch <- "já"
+  zak <- "ty"
+  typ_vypoctu <- "indikativni"
+
+  # marzeMin <- denni[[2]][6]
+  # marzeDop <- denni[[2]][7]
+  
+  txt_marzeMin <- sprintf("%.2f", marzeMin) # text, zobrazuje cislo s presne 2 decimals
+  txt_marzeDop <- sprintf("%.2f", marzeDop)
+
+  fix_cena <- data.frame(
+    Parametr = c(
+      "Obchodník",
+      "Zákazník",
+      "Období dodávky",
+      "Vytvoření nabídky",
+      "Platnost nabídky",
+      "Typ nabídky",
+      "CQ [MWh]",
+      # "ACQ [MWh]",
+      "Předávací cena pro obchod [€]",
+      "Předávací cena pro obchod [CZK]",
+      "HM1 [€]",
+      "Prodejní cena pro zákazníka [€]",
+      "Prodejní cena pro zákazníka [CZK]"
+    ),
+    
+    Hodnota = c(
+      obch,
+      zak,
+      paste0(delOd, " až ", delDo),
+      format(as.POSIXct(Sys.time(), tz = "Europe/Prague", origin = "1899-12-30"), "%F %R"),
+      paste0(format(as.POSIXct(Sys.Date(), origin = "1899-12-30"), "%F"), " 15:00"),
+      paste("testovaci"),
+      # ifelse(typ_vypoctu == "indikativni"|conditionCSV|condition4GW|conditionTYP|!conditionPLA, paste("Pouze indikativní"), paste("Závazná")),
+      suma_profil,
+      # paste(
+      #   paste(acq$year, acq$rocni_odber, sep = ": "),
+      #   collapse = ", "),
+      round(predavaciCena, 2),
+      round(predavaciCena_czk, 2),
+      paste("Minimální:", txt_marzeMin, " /  Doporučená:", txt_marzeDop),
+      paste("Minimální:",  round(predavaciCena+marzeMin, 2), 
+            " /  Doporučená:",  round(predavaciCena+marzeDop, 2)),
+      paste("Minimální:", round(predavaciCena_czk+marzeMin*kurz, 2), 
+            " /  Doporučená:", round(predavaciCena_czk+marzeDop*kurz, 2))
+    )
+  )
+```
 
 
 # -> uloz presv profil pro kontrolu oproti excelu
