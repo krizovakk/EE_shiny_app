@@ -1,9 +1,10 @@
 # ------------------------------------------------------------------------------ TEST
 
 
+# profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/DHL export-elektrina.xlsx")
 # profil <- read_excel("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/EE/EE_input_profil.xlsx")
-# 
-# delOd <- as.POSIXct("2026-07-01", tz = "Europe/Prague")
+
+# delOd <- as.POSIXct("2027-01-01", tz = "Europe/Prague")
 # delDo <- as.POSIXct("2027-12-31", tz = "Europe/Prague")
 # 
 # obch <- "krizova"
@@ -22,17 +23,18 @@ require(openxlsx)
 # ------------------------------------------------------------------------------ ANALYZA
 
 
-analyza_data <- function(profil, delOd, delDo, obch, zak, acq1, acq2, acq3, acq4, acq5, typ_vypoctu, priplatek) {
+analyza_data <- function(profil, delOd, delDo, obch, zak, typ_vypoctu, priplatky, priplatek) {
   
   tms_now <- as.POSIXct(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), tz = "Europe/Prague")
   
 message(paste("NOW", tms_now))
 message(paste(delOd, " az ", delDo))
   
-  params <- readRDS("params.rds")
-  rezim <- as.numeric(params$value[params$name == "rezim"])
+  app_params <- readRDS("params.rds")
+  denni <- readRDS("params.rds")
+  rezim <- as.numeric(app_params$value[app_params$name == "rezim"])
   
-  conditionPLA <- hour(tms_now)<20&rezim == 1
+  conditionPLA <- hour(tms_now)<15
   if (!conditionPLA){
     showNotification(
       paste("Po 15. hodině již není možné generovat závazné nabídky."),
@@ -42,11 +44,14 @@ message(paste(delOd, " az ", delDo))
     typ_vypoctu <- "indikativni"
   }
   
+  conditionREZ <- rezim == 1
+  if (!conditionREZ){
+    typ_vypoctu <- "indikativni"
+  }
+  
   message(conditionPLA)
   message(rezim)  
-  
-
-  
+  message(typ_vypoctu)
   
   
   ########################################### START PRESVATKOVANI ##############################################################
@@ -104,7 +109,7 @@ message(paste(delOd, " az ", delDo))
     mutate( # definice parovani
       
       parovani = if_else(
-        !is.na(holiday) & typeDay == "reg",
+        !is.na(holiday) & typeDay == "reg", # vsedni den, ktery je svatek
         "nejblizsi vsedni",
         "puvodni profil")
       
@@ -300,9 +305,6 @@ message(paste(delOd, " az ", delDo))
   ########################################### KONEC PRESVATKOVANI ##############################################################
   
   
-  
-  
-  
   # ---------------------------------------------------------------------------- INPUT :: HPFC - OK
   
 
@@ -339,9 +341,9 @@ message("HPFC krivka - ok")
   
 message(paste("OTC", otc_tms))
   
-  riskMargin <- as.numeric(params$value[params$name == "riskMargin"])
-  odchylka <- as.numeric(params$value[params$name == "odchylka"])
-  rizeniOdch <- as.numeric(params$value[params$name == "rizeniOdch"])
+  riskMargin <- as.numeric(app_params$value[app_params$name == "riskMargin"])
+  odchylka <- as.numeric(app_params$value[app_params$name == "odchylka"])
+  rizeniOdch <- as.numeric(app_params$value[app_params$name == "rizeniOdch"])
   
   pricti <- riskMargin + odchylka + rizeniOdch
   
@@ -394,15 +396,15 @@ message(paste("OTC", otc_tms))
   
   # ------------------ kontrola ***
   
-  conditionCSV <- difftime(tms_now, otc_tms, units = "mins") > as.numeric(params$value[params$name == "stari_OTCcen"])
-  if (conditionCSV) {
-    showNotification(
-      "Nejsou k dispozici aktuální tržní ceny, nabídka je pouze indikativní.",
-      type = "warning",
-      duration = 15)
-    typ_vypoctu <- "indikativni"
-  }
-  
+  # conditionCSV <- difftime(tms_now, otc_tms, units = "mins") > as.numeric(app_params$value[app_params$name == "stari_OTCcen"])
+  # if (conditionCSV) {
+  #   showNotification(
+  #     "Nejsou k dispozici aktuální tržní ceny, nabídka je pouze indikativní.",
+  #     type = "warning",
+  #     duration = 15)
+  #   typ_vypoctu <- "indikativni"
+  # }
+
   
   # ---------------------------------------------------------------------------- CREATE :: frame - OK
   
@@ -500,50 +502,14 @@ message("Join - ok")
   if (conditionZAP) {
     stop('Zaporna data v profilu, zkontroluj vstupni data.')
   }
-  
-  # acq_map <- c(
-  #   if (exists("acq1")) c(acq1 = acq1),
-  #   if (exists("acq2")) c(acq2 = acq2),
-  #   if (exists("acq3")) c(acq3 = acq3),
-  #   if (exists("acq4")) c(acq4 = acq4),
-  #   if (exists("acq5")) c(acq5 = acq5)
-  # )
-  # 
-  # df_acq <- join %>%
-  #   group_by(facq) %>%
-  #   summarise(acq = round(sum(presvProfil), 0), .groups = "drop") %>% 
-  #   mutate(
-  #     inp = as.numeric(acq_map[match(as.character(facq), names(acq_map))]),
-  #     inp_round = round(inp, 0),
-  #     missing_inp = is.na(inp_round),
-  #     check = !missing_inp & acq == inp_round
-  #   )
-  # 
-  # if (any(df_acq$missing_inp)) {
-  #   missing_facq <- paste(df_acq$facq[df_acq$missing_inp], collapse = ", ")
-  #   showNotification(
-  #     paste0("Chybi ACQ pro: ", missing_facq, "."),
-  #     type = "error",
-  #     duration = 15)
-  #   # return(NULL)
-  # }
-  # 
-  # conditionACQ <- any(!df_acq$check)
-  # if (conditionACQ) {
-  #   showNotification(
-  #     "Zadané ACQ nesouhlasí se součtem v profilu, zkontrolujte vstupní data.",
-  #     type = "error",
-  #     duration = 15)
-  #   return(NULL)
-  # }
 
   
   # ---------------------------------------------------------------------------- CALCULATE :: EUR FWD
   
   
-  low_spot <- as.numeric(params$value[params$name == "low_spot"])
-  aktual_spot <- as.numeric(params$value[params$name == "aktual_spot"])
-  cnb_kurz <- as.numeric(params$value[params$name == "cnb_kurz"])
+  low_spot <- as.numeric(app_params$value[app_params$name == "low_spot"])
+  aktual_spot <- as.numeric(app_params$value[app_params$name == "aktual_spot"])
+  cnb_kurz <- as.numeric(app_params$value[app_params$name == "cnb_kurz"])
   
   
   fwd <- read_excel(file.path("data_exchange", "denni_data", "001_FWD_SPP-CZ_KAM_Aktual.xlsm"),
@@ -582,7 +548,7 @@ message("FWD krivka - ok")
   suma_profil <- sum(join$presvProfil)
   suma_EUR <- sum(join$EUR)
   
-  predavaciCena <- suma_EUR/suma_profil
+  predavaciCena <- suma_EUR/suma_profil+priplatek
   nakladDiagram_pct <- predavaciCena/mean_EURmwh
   nakladDiagram_eur <- predavaciCena-mean_EURmwh
   
@@ -600,7 +566,7 @@ message("FWD krivka - ok")
       duration = 15)
   }
   
-  condition4GW <- any(acq$rocni_odber > 250000)
+  condition4GW <- any(acq$rocni_odber > 2500)
   # condition4GW <- any(acq$rocni_odber > 2500)
   if (condition4GW) {
     typ_vypoctu <- "indikativni"
@@ -614,8 +580,8 @@ message("FWD krivka - ok")
   # ---------------------------------------------------------------------------- CREATE :: marze - IP
   
   
-  marzeMin <- as.numeric(params$value[params$name == "marzeMin"])
-  marzeDop <- as.numeric(params$value[params$name == "marzeDop"])
+  marzeMin <- as.numeric(app_params$value[app_params$name == "marzeMin"])
+  marzeDop <- as.numeric(app_params$value[app_params$name == "marzeDop"])
 
   txt_marzeMin <- sprintf("%.2f", marzeMin) # text, zobrazuje cislo s presne 2 decimals
   txt_marzeDop <- sprintf("%.2f", marzeDop)
@@ -639,7 +605,7 @@ message("FWD krivka - ok")
       "HM1 [€]",
       "Prodejní cena pro zákazníka [€]",
       "Prodejní cena pro zákazníka [CZK]",
-      "Příplatek za specifika"
+      "Kurz ČNB v d-1"
     ),
     
     Hodnota = c(
@@ -660,7 +626,7 @@ message("FWD krivka - ok")
             " /  Doporučená:",  round(predavaciCena+marzeDop, 2)),
       paste("Minimální:", round(predavaciCena_czk+marzeMin*cnb_kurz, 2), 
             " /  Doporučená:", round(predavaciCena_czk+marzeDop*cnb_kurz, 2)),
-      priplatek
+      cnb_kurz
     )
   )
   
@@ -678,42 +644,46 @@ message("FWD krivka - ok")
   
   # pdf pro Nakup
 
-  # if (typ_vypoctu == "zavazny") {
-  #   
-  #   timestamp <- format(tms_now, "%Y%m%d_%H%M", tz = "Europe/Prague")
-  #   
-  #   p <- ggplot(profil, aes(datum, profilMWh)) +
-  #     geom_col(fill = "gold") +
-  #     labs(x = "měsíc dodávky",
-  #          y = "profil spotřeby [MWh]",
-  #          title = "Profil spotřeby klienta") +
-  #     scale_x_datetime(date_breaks = "1 month", date_labels = "%Y-%m") +
-  #     scale_y_continuous(breaks = seq(0, 700, by = 50))+
-  #     theme_light() +
-  #     theme(axis.text.x = element_text(angle = 90))
-  #   
-  #   rmarkdown::render(
-  #     input = "reportNakup.Rmd",
-  #     output_file = paste0("pdf_logy/proNakup_VypocetFixCenyZP_report_",
-  #                          timestamp, "_",
-  #                          obch, "_", zak, "_", fin_cenaEUR, ".pdf"),
-  #     output_format = "pdf_document",
-  #     params = list(
-  #       obchodnik = obch,
-  #       zakaznik = zak,
-  #       datum_od = delOd,
-  #       datum_do = delDo,
-  #       profil = profil,
-  #       plot_profil = p,
-  #       denni = denni, 
-  #       fwd = fwd,
-  #       otc = otc,
-  #       fix_cena = fix_cena)
-  #   )
-  #   
-  # } else {
-  #   message("Automatické ukládání PDF přeskočeno – indikativní výpočet")
-  # }
+  if (typ_vypoctu == "zavazny") {
+
+    timestamp <- format(tms_now, "%Y%m%d_%H%M", tz = "Europe/Prague")
+
+    p <- ggplot(presv_diagram, aes(timestamp, presvProfil)) +
+      geom_col(fill = "gold") +
+      labs(x = "měsíc dodávky",
+           y = "profil spotřeby [MWh]",
+           title = "Profil spotřeby klienta") +
+      scale_x_datetime(date_breaks = "1 month", date_labels = "%Y-%m") +
+      scale_y_continuous(breaks = seq(0, 700, by = 50))+
+      theme_light() +
+      theme(axis.text.x = element_text(angle = 90))
+
+    cena <- round(predavaciCena, 2)
+    
+    rmarkdown::render(
+      input = "EE_reportNakup.Rmd",
+      output_file = paste0("pdf_logy/proNakup_VypocetFixCenyEE_report_",
+                           timestamp, "_",
+                           obch, "_", zak, "_", cena, ".pdf"),
+      output_format = "pdf_document",
+      params = list(
+        obchodnik = obch,
+        zakaznik = zak,
+        datum_od = delOd,
+        datum_do = delDo,
+        nakladDiagram_eur = nakladDiagram_eur,
+        profil = profil,
+        # plot_profil = p,
+        # fwd = fwd,
+        otc = otc,
+        fix_cena = fix_cena,
+        denni = denni, 
+        priplatky = priplatky)
+    )
+
+  } else {
+    message("Automatické ukládání PDF přeskočeno – indikativní výpočet")
+  }
 
   
   # ---------------------------------------------------------------------------- RETURN :: fix_cena - OK

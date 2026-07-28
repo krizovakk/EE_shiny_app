@@ -1,20 +1,22 @@
 ---
-title: "Kalkulačka fixní ceny ZP"
+title: "Kalkulačka fixní ceny EE"
 subtitle: "Report k výpočtu"
-date: "`r Sys.time()`"
+date:  "`r format(Sys.time(), tz = 'Europe/Prague', format = '%d.%m.%Y %H:%M')`"
 output: pdf_document
 params:
   obchodnik: ""
   zakaznik: ""
   datum_od: ""
   datum_do: ""
-  profil: NA
-  plot_profil: NULL
-  fwd: NA
-  otc: NA
+  # profil: NA
+  # fwd: NA
+  # otc: NA
   fix_cena: NA
+  note: NA
+  priplatky: NA
 ---
 
+**Tento dokument je důvěrný a slouží pouze pro interní účely SPP CZ.**
 
 ```{r echo=FALSE, out.width="30%"}
 # knitr::include_graphics("C:/Users/krizova/Documents/R/02 cenoveKalkukacky/_vyvoj/shiny_app/data/22743_SPP_logo spp_final update.jpg")
@@ -25,10 +27,11 @@ params:
 **Obchodník:** `r params$obchodnik`  
 **Zákazník:** `r params$zakaznik`  
 **Období dodávky:** `r params$datum_od` – `r params$datum_do`  
+**Udávaná specifika profilu:** `r params$priplatky`
 
 ```{r echo=FALSE}
 
-knitr::kable(params$profil, caption = "Profil spotřeby") 
+# knitr::kable(params$profil, caption = "Profil spotřeby") 
 # params$plot_profil
 # knitr::kable(params$fwd, caption = "FWD křivka") 
 # knitr::kable(params$otc, caption = "OTC ceny") 
@@ -41,7 +44,10 @@ knitr::kable(params$profil, caption = "Profil spotřeby")
 
 ```{r echo=FALSE}
 knitr::kable(params$fix_cena, caption = "Fixní cena")
-
 ```
 
 *Předávací ani prodejní cena neobsahují náklad na BSD a toleranci.*
+
+# Poznámka 
+
+`r params$note` 

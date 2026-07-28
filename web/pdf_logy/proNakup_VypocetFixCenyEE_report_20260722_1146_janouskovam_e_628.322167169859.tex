@@ -1,0 +1,208 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[
+]{article}
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{% scales image to fit in text height/width
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi% select the smaller of both
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi%
+}
+% Set default figure placement to htbp
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={Kalkulačka fixní ceny EE},
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Kalkulačka fixní ceny EE}
+\usepackage{etoolbox}
+\makeatletter
+\providecommand{\subtitle}[1]{% add subtitle to \maketitle
+  \apptocmd{\@title}{\par {\large #1 \par}}{}{}
+}
+\makeatother
+\subtitle{Report k výpočtu - kompletní data pro Nákup}
+\author{}
+\date{\vspace{-2.5em}22.07.2026 11:46}
+
+\begin{document}
+\maketitle
+
+\textbf{Tento dokument je důvěrný a slouží pouze pro interní účely SPP
+CZ.}
+
+\section{Vstupní parametry}\label{vstupnuxed-parametry}
+
+\textbf{Obchodník:} janouskovam\\
+\textbf{Zákazník:} e\\
+\textbf{Období dodávky:} 2026-08-01 -- 2027-12-31
+
+\pandocbounded{\includegraphics[keepaspectratio]{pdf_logy/proNakup_VypocetFixCenyEE_report_20260722_1146_janouskovam_e_628.322167169859_files/pdf_logy/proNakup_VypocetFixCenyEE_report_20260722_1146_janouskovam_e_628.322167169859_files/figure-latex/unnamed-chunk-2-1.pdf}}
+
+\begin{longtable}[]{@{}lrlrlrl@{}}
+\caption{OTC ceny ze 2026-07-21 15:11:00}\tabularnewline
+\toprule\noalign{}
+season & price & product & year & quater & month & cal \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+season & price & product & year & quater & month & cal \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Aug-26 & 131.010 & 8/2026 & 2026 & NA & 8 & NA \\
+Sep-26 & 142.830 & 9/2026 & 2026 & NA & 9 & NA \\
+Oct-26 & 142.215 & 10/2026 & 2026 & NA & 10 & NA \\
+Nov-26 & 158.630 & 11/2026 & 2026 & NA & 11 & NA \\
+Dec-26 & 154.080 & 12/2026 & 2026 & NA & 12 & NA \\
+Q426 & 152.275 & Q4/2026 & 2026 & Q4 & NA & NA \\
+Q127 & 144.420 & Q1/2027 & 2027 & Q1 & NA & NA \\
+Q227 & 101.910 & Q2/2027 & 2027 & Q2 & NA & NA \\
+Q327 & 108.170 & Q3/2027 & 2027 & Q3 & NA & NA \\
+Win 26 & NA & 2026 & 2026 & NA & NA & NA \\
+Sum 27 & NA & 2027 & 2027 & NA & NA & NA \\
+Win 27 & NA & 2027 & 2027 & NA & NA & NA \\
+Sum 28 & NA & 2028 & 2028 & NA & NA & NA \\
+Win 28 & NA & 2028 & 2028 & NA & NA & NA \\
+Sum 29 & NA & 2029 & 2029 & NA & NA & NA \\
+2027 & 115.905 & Cal27/2027 & 2027 & NA & NA & Cal27 \\
+2028 & 96.435 & Cal28/2028 & 2028 & NA & NA & Cal28 \\
+2029 & 86.255 & Cal29/2029 & 2029 & NA & NA & Cal29 \\
+\end{longtable}
+
+\begin{longtable}[]{@{}ll@{}}
+\caption{Nastavení denních parametrů}\tabularnewline
+\toprule\noalign{}
+name & value \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+name & value \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+low\_spot & 24.25 \\
+aktual\_spot & 24.35 \\
+cnb\_kurz & 24.23 \\
+riskMargin & 0 \\
+odchylka & 1.5 \\
+rizeniOdch & 0.33 \\
+fve & 100 \\
+bater & 600 \\
+kogen & 500 \\
+marzeMin & 1.2 \\
+marzeDop & 6 \\
+stari\_OTCcen & 30 \\
+rezim & 1 \\
+banner & Naceneni v indikativnim rezimu. \\
+\end{longtable}
+
+\section{Výsledná fixní cena}\label{vuxfdslednuxe1-fixnuxed-cena}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.4304}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.5696}}@{}}
+\caption{Fixní cena}\tabularnewline
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Parametr
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Hodnota
+\end{minipage} \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Parametr
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Hodnota
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Obchodník & janouskovam \\
+Zákazník & e \\
+Období dodávky & 2026-08-01 až 2027-12-31 \\
+Vytvoření nabídky & 2026-07-22 11:46 \\
+Platnost nabídky & 2026-07-22 15:00 \\
+Typ nabídky & Závazná \\
+CQ {[}MWh{]} & 9636.55 \\
+ACQ {[}MWh{]} & 2026: 2860, 2027: 6776 \\
+Předávací cena pro obchod {[}€{]} & 628.32 \\
+Předávací cena pro obchod {[}CZK{]} & 15224.25 \\
+HM1 {[}€{]} & Minimální: 1.20 / Doporučená: 6.00 \\
+Prodejní cena pro zákazníka {[}€{]} & Minimální: 629.52 / Doporučená:
+634.32 \\
+Prodejní cena pro zákazníka {[}CZK{]} & Minimální: 15253.32 /
+Doporučená: 15369.63 \\
+Kurz ČNB v d-1 & 24.23 \\
+Příplatek za specifika & 500 \\
+\end{longtable}
+
+\emph{Předávací ani prodejní cena neobsahují náklad na BSD a toleranci.}
+
+\section{Poznámka}\label{poznuxe1mka}
+
+\end{document}

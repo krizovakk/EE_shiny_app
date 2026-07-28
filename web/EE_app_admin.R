@@ -7,11 +7,10 @@
 # run only once or when restarting
 
 # params <- data.frame(
-#   name = c("low_spot", "aktual_spot", "cnb_kurz", "riskMargin", "odchylka", "rizeniOdch", "fve", "bater", "kogen", "marzeMin", "marzeDop", "stari_OTCcen", "rezim", "banner"),
-#   value = c(24.25, 24.35, 24.23, 0, 1.5, 0.33, 100, 200, 300, 1.2, 6, 30, 1, "Naceneni v indikativnim rezimu.")
+#   name = c("low_spot", "aktual_spot", "cnb_kurz", "riskMargin", "odchylka", "rizeniOdch", "fve", "bater", "kogen", "sdil", "marzeMin", "marzeDop", "stari_OTCcen", "rezim", "banner"),
+#   value = c(24.25, 24.35, 24.23, 0, 1.5, 0.33, 100, 200, 300, 400, 1.2, 6, 30, 1, "Naceneni v indikativnim rezimu.")
 # )
 # saveRDS(params, "params.rds")
-
 # params <- readRDS("params.rds")
 
 # .............................................................................. global - DONE
@@ -71,8 +70,16 @@ ui <- tagList(
           font-size: 15px;
           ",
       ),
+        
+      tags$head(
+        tags$style(HTML("
+    .shiny-input-checkboxgroup .checkbox {
+      margin-top: 10px;
+    }
+  "))
+      ),
       
-      tags$a(
+    tags$a(
         href = "https://www.spp.cz/",                        # prozatimni adresa
         target = "_blank",
         style = "
@@ -169,7 +176,10 @@ ui <- tagList(
                              tagList("Období dodávky", span("*", style="color:red")),
                              width = "60%",
                              separator = " - ")
-            ),
+            )
+          ),
+          
+          list(
             
             checkboxGroupInput(
               inputId = "priplatky",
@@ -177,19 +187,10 @@ ui <- tagList(
               choices = c(
                 "FVE" = "fve",
                 "Baterie" = "bater",
-                "Kogenerace" = "kogen"
-              ),
-              inline = TRUE
+                "Kogenerace" = "kogen",
+                "Sdílení" = "sdil"
+              )
             )
-          ),
-          
-          list(
-            
-            numericInput("acq1", "ACQ 2026 v MWh", "", width="60%"),
-            numericInput("acq2", "ACQ 2027 v MWh", "", width="60%"),
-            numericInput("acq3", "ACQ 2028 v MWh", "", width="60%"),
-            numericInput("acq4", "ACQ 2029 v MWh", "", width="60%"),
-            numericInput("acq5", "ACQ 2030 v MWh", "", width="60%")
           ) # konec 2. karty, 1. sloupce
         ))), # konec 1. sloupce
     
@@ -229,7 +230,7 @@ ui <- tagList(
           style = "margin-top:5px;"
         )
       ),
-
+      
       DT::DTOutput("results"), 
       
       # HTML('<span style="color:#808080; font-style: italic;">Předávací ani prodejní cena neobsahují náklad na BSD, financování a toleranci.</span>'),
@@ -257,7 +258,7 @@ ui <- tagList(
 server <- function(input, output, session) {
   
   source("EE_analyza.R")
- 
+  
   
   # ---------------------------------------------------------------- admin panel
   
@@ -384,8 +385,7 @@ server <- function(input, output, session) {
   
   data_upload <- reactive({
     req(input$upload)
-    upld <- readxl::read_excel(input$upload$datapath, range = cell_cols(1:2))
-    upld
+    readxl::read_excel(input$upload$datapath, range = cell_cols(1:2))
   })
   
   
@@ -442,33 +442,47 @@ server <- function(input, output, session) {
   })
   
   # ---- PRIPLATKY ----
-  # 
-  # koeficienty <- c(
-  #   fve = 100,
-  #   bater = 200,
-  #   kogen = 300
-  # )
   
-  # fve = as.numeric(get_param("fve"))
-  # bater = as.numeric(get_param("bater"))
-  # kogen = as.numeric(get_param("kogen"))
-  # 
-  # koeficienty <- c(
-  #   fve,
-  #   bater,
-  #   kogen
-  # )
-  # 
   priplatek <- reactive({
     
     koeficienty <- c(
       fve = as.numeric(get_param("fve")),
       bater = as.numeric(get_param("bater")),
-      kogen = as.numeric(get_param("kogen"))
+      kogen = as.numeric(get_param("kogen")),
+      sdil = as.numeric(get_param("sdil"))
     )
-    
     sum(koeficienty[input$priplatky], na.rm = TRUE)
   })
+  
+  # priplatky_report <- reactive({
+  #   
+  #   koeficienty <- c(
+  #     fve = as.numeric(get_param("fve")),
+  #     bater = as.numeric(get_param("bater")),
+  #     kogen = as.numeric(get_param("kogen")),
+  #     sdil = as.numeric(get_param("sdil"))
+  #   )
+  #   
+  #   nazvy <- c(
+  #     fve = "FVE",
+  #     bater = "Baterie",
+  #     kogen = "Kogenerace",
+  #     sdil = "Sdílení"
+  #   )
+  #   
+  #   if (length(input$priplatky) == 0) {
+  #     return(data.frame(
+  #       Specifikum = character(),
+  #       Koeficient = numeric()
+  #     ))
+  #   }
+  #   
+  #   data.frame(
+  #     Specifikum = nazvy[input$priplatky],
+  #     Koeficient = koeficienty[input$priplatky],
+  #     row.names = NULL
+  #   )
+  # })
   
   # ---- SPUSTENI VYPOCTU ----
   
@@ -496,12 +510,13 @@ server <- function(input, output, session) {
       d$end,
       obch = input$text1,
       zak  = input$text2,
-      acq1 = input$acq1,
-      acq2 = input$acq2,
-      acq3 = input$acq3,
-      acq4 = input$acq4,
-      acq5 = input$acq5,
+      # acq1 = input$acq1,
+      # acq2 = input$acq2,
+      # acq3 = input$acq3,
+      # acq4 = input$acq4,
+      # acq5 = input$acq5,
       typ_vypoctu = typ_vypoctu(), 
+      priplatky = input$priplatky,
       priplatek = priplatek()
     )
   }
@@ -563,64 +578,65 @@ server <- function(input, output, session) {
   
   # observe({
   #   if (!is.null(vysledek_r()) &&
-  #       typ_vypoctu == "zavazny") {
-  #       # vysledek_r()$typ_vypoctu == "zavazny") {
+  #       # typ_vypoctu == "zavazny") {
+  #     vysledek_r()$typ_vypoctu == "zavazny") {
   #     shinyjs::enable("downloadReport")
   #   } else {
   #     shinyjs::disable("downloadReport")
   #   }
   # })
-  # 
   
-  # observe({
-  #   if (typ_vypoctu() == "zavazny" && !is.null(vysledek_r())) {
-  #     shinyjs::enable("downloadReport")
-  #   } else {
-  #     shinyjs::disable("downloadReport")
-  #   }
-  # })
-  # 
   
-  # tms_now <- as.POSIXct(Sys.time(), tz = "Europe/Prague")
-  # format(tms_now, "%Y-%m-%d %H:%M:%S")
-  # 
-  # output$downloadReport <- downloadHandler(
-  #   filename = function() {
-  #     paste0("VypocetFixCenyZP_report_", tms_now, "_", input$text1, "_", input$text2, ".pdf")
-  #   },
-  #   contentType = "application/pdf",
-  #   content = function(file) {
-  #     
-  #     if (typ_vypoctu() != "zavazny") {
-  #       showNotification("PDF lze stáhnout pouze pro závazný výpočet.", type = "error")
-  #       return(NULL)
-  #     }
-  #     
-  #     if (is.null(vysledek_r())) {
-  #       showNotification("Nejprve spusťte výpočet.", type = "error")
-  #       return(NULL)
-  #     }
-  #     
-  # result <- vysledek_r()
+  observe({
+    if (typ_vypoctu() == "zavazny" && !is.null(vysledek_r())) {
+      shinyjs::enable("downloadReport")
+    } else {
+      shinyjs::disable("downloadReport")
+    }
+  })
   
-  # rmarkdown::render(
-  #   input = "report.Rmd",
-  #   output_format = rmarkdown::pdf_document(),
-  #   output_file = file,
-  #   params = list(
-  #     obchodnik = input$text1,
-  #     zakaznik = input$text2,
-  #     datum_od = input$date[1],
-  #     datum_do = input$date[2],
-  #     profil = data_upload(),
-  #     fwd = result$fwd,
-  #     fix_cena = result$fix_cena,
-  #     note = input$note
-  #   ),
-  #   envir = new.env(parent = globalenv())
-  # )
-  # }
-  # )
+  
+  tms_now <- as.POSIXct(Sys.time(), tz = "Europe/Prague")
+  format(tms_now, "%Y-%m-%d %H:%M:%S")
+  
+  output$downloadReport <- downloadHandler(
+    filename = function() {
+      paste0("VypocetFixCenyEE_report_", tms_now, "_", input$text1, "_", input$text2, ".pdf")
+    },
+    contentType = "application/pdf",
+    content = function(file) {
+      
+      if (typ_vypoctu() != "zavazny") {
+        showNotification("PDF lze stáhnout pouze pro závazný výpočet.", type = "error")
+        return(NULL)
+      }
+      
+      if (is.null(vysledek_r())) {
+        showNotification("Nejprve spusťte výpočet.", type = "error")
+        return(NULL)
+      }
+      
+      result <- vysledek_r()
+      
+      rmarkdown::render(
+        input = "EE_report.Rmd",
+        output_format = rmarkdown::pdf_document(),
+        output_file = file,
+        params = list(
+          obchodnik = input$text1,
+          zakaznik = input$text2,
+          datum_od = input$date[1],
+          datum_do = input$date[2],
+          # profil = data_upload(),
+          # fwd = result$fwd,
+          fix_cena = result$fix_cena,
+          note = input$note,
+          priplatky = input$priplatky
+        ),
+        envir = new.env(parent = globalenv())
+      )
+    }
+  )
   
 } # konec serveru
 
